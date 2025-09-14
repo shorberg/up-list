@@ -6,24 +6,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; background: #f6f8fb; }
-    h1 { margin-bottom: 10px; }
-    .bar { margin-bottom: 15px; }
-    input, button { padding: 6px 10px; margin-right: 6px; }
-    table { width: 100%; border-collapse: collapse; background: #fff; }
-    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-    thead { background: #0f172a; color: #fff; }
-    .x { font-weight: bold; color: black; }
-    .rx { font-weight: bold; color: red; margin-left: 4px; }
+    body { font-family: Arial, sans-serif; background:#f6f8fb; margin:0; padding:20px; }
+    h1 { margin:0; }
+    .bar { margin:12px 0; display:flex; gap:8px; }
+    input { padding:6px; }
+    button { padding:6px 10px; cursor:pointer; }
+    table { width:100%; border-collapse:collapse; margin-top:16px; background:#fff; }
+    th, td { border:1px solid #ddd; padding:8px; text-align:left; }
+    th { background:#0f172a; color:#fff; }
+    td.center { text-align:center; }
+    .blackX { color:black; font-weight:bold; }
+    .redX { color:red; font-weight:bold; }
   </style>
 </head>
 <body>
   <h1>Reliable Superstore BDC Online Up List</h1>
+  <div><span id="today"></span> • <span id="clock"></span></div>
 
   <div class="bar">
     <input id="nameInput" type="text" placeholder="Add team member name" />
     <button id="addBtn">Add</button>
-    <button id="nextBtn">Next Lead (move X)</button>
+    <button id="nextBtn">Next Lead</button>
+    <button id="resetBtn">Reset</button>
   </div>
 
   <table>
@@ -31,9 +35,11 @@
       <tr>
         <th>Order</th>
         <th>Name</th>
+        <th>Status</th>
         <th>Up</th>
         <th>Leads</th>
         <th>Last Lead</th>
+        <th>Makeups</th>
         <th>Actions</th>
       </tr>
     </thead>
@@ -49,124 +55,86 @@
   const tbody = document.getElementById("tbody");
   const nameInput = document.getElementById("nameInput");
 
-  async function fetchPeople() {
+  // Clock
+  function tick(){
+    const d = new Date();
+    document.getElementById("today").textContent = d.toLocaleDateString(undefined, { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+    document.getElementById("clock").textContent = d.toLocaleTimeString();
+  }
+  setInterval(tick, 1000); tick();
+
+  // Fetch people
+  async function fetchPeople(){
     const { data, error } = await supabase
       .from("people")
       .select("*")
-      .order("order", { ascending: true });
-    if (error) { console.error(error); return []; }
+      .order("order", { ascending:true });
+    if(error){ console.error(error); return []; }
     return data || [];
   }
 
-  function fmtTime(ts) {
-    if (!ts) return "";
-    return new Date(ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  // Add person
+  async function addPerson(){
+    const name = nameInput.value.trim();
+    if(!name) return;
+    await supabase.from("people").insert([{ name, status:"Here", is_up:false, order:0, leads:0, makeup_count:0 }]);
+    nameInput.value = "";
+    loadPeople();
   }
 
-  function renderRow(p) {
+  // Need Makeup
+  async function needMakeup(person){
+    const { error } = await supabase
+      .from("people")
+      .update({ makeup_count: (person.makeup_count || 0) + 1 })
+      .eq("id", person.id);
+
+    if(error){ console.error(error); }
+    else { console.log("Makeup added for", person.name); }
+    loadPeople();
+  }
+
+  // Reset list
+  async function resetList(){
+    const { error } = await supabase
+      .from("people")
+      .update({ order:0, is_up:false, leads:0, last_served:null, makeup_count:0 });
+    if(error) console.error(error);
+    loadPeople();
+  }
+
+  // Render table
+  function renderRow(person){
     const tr = document.createElement("tr");
-    let upDisplay = "";
-    if (p.is_up) upDisplay = '<span class="x">X</span>';
-    if (p.makeup_count && p.makeup_count > 0) {
-      upDisplay += " " + "❌".repeat(p.makeup_count);
-    }
+
+    const upCell = person.is_up ? `<span class="blackX">X</span>` : "";
+    const makeups = person.makeup_count > 0 ? `<span class="redX">${"X".repeat(person.makeup_count)}</span>` : "";
+
     tr.innerHTML = `
-      <td>${p.order}</td>
-      <td>${p.name}</td>
-      <td>${upDisplay}</td>
-      <td>${p.leads || 0}</td>
-      <td>${fmtTime(p.last_served)}</td>
+      <td>${person.order}</td>
+      <td>${person.name}</td>
+      <td>${person.status}</td>
+      <td class="center">${upCell}</td>
+      <td>${person.leads}</td>
+      <td>${person.last_served || ""}</td>
+      <td class="center">${makeups}</td>
       <td>
-        <button onclick="needMakeup(${p.id}, ${p.leads || 0})">Need Makeup</button>
+        <button onclick='needMakeup(${JSON.stringify(person)})'>Need Makeup</button>
       </td>
     `;
     return tr;
   }
 
-  async function refreshTable() {
+  async function loadPeople(){
     tbody.innerHTML = "";
-    const people = await fetchPeople();
-    people.forEach(p => tbody.appendChild(renderRow(p)));
+    const data = await fetchPeople();
+    data.forEach(p => tbody.appendChild(renderRow(p)));
   }
 
-  async function addPerson() {
-    const name = nameInput.value.trim();
-    if (!name) return;
+  document.getElementById("addBtn").onclick = addPerson;
+  document.getElementById("resetBtn").onclick = resetList;
 
-    const people = await fetchPeople();
-    const nextOrder = people.length ? Math.max(...people.map(p => p.order)) + 1 : 1;
-    const fixed = name.toLowerCase().replace(/\b\w/g, m => m.toUpperCase());
-
-    await supabase.from("people").insert([
-      { name: fixed, order: nextOrder, is_up: people.length === 0, leads: 0, makeup_count: 0 }
-    ]);
-
-    nameInput.value = "";
-    refreshTable();
-  }
-
-  async function nextLead() {
-    const people = await fetchPeople();
-    if (people.length === 0) return;
-
-    // Anyone with makeup?
-    const makeup = people.find(p => p.makeup_count && p.makeup_count > 0);
-    if (makeup) {
-      await supabase.from("people").update({
-        leads: (makeup.leads || 0) + 1,
-        last_served: new Date().toISOString(),
-        makeup_count: makeup.makeup_count - 1
-      }).eq("id", makeup.id);
-      return refreshTable();
-    }
-
-    // Find current "up"
-    const current = people.find(p => p.is_up);
-    if (!current) {
-      await supabase.from("people").update({ is_up: true }).eq("id", people[0].id);
-      return refreshTable();
-    }
-
-    // Give current person a lead
-    await supabase.from("people").update({
-      leads: (current.leads || 0) + 1,
-      last_served: new Date().toISOString(),
-      is_up: false
-    }).eq("id", current.id);
-
-    // Rotate to next
-    let idx = people.findIndex(p => p.id === current.id);
-    let nextIdx = (idx + 1) % people.length;
-    let next = people[nextIdx];
-
-    await supabase.from("people").update({ is_up: true }).eq("id", next.id);
-
-    refreshTable();
-  }
-
-  async function needMakeup(id, leads) {
-    // reduce lead count and add a makeup
-    await supabase.from("people").update({
-      leads: Math.max(0, leads - 1),
-      makeup_count: supabase.rpc('increment_makeup', { row_id: id })
-    }).eq("id", id);
-
-    // fallback if RPC not available → just increment makeup_count manually
-    const { data } = await supabase.from("people").select("makeup_count").eq("id", id).single();
-    if (data) {
-      await supabase.from("people").update({
-        makeup_count: (data.makeup_count || 0) + 1
-      }).eq("id", id);
-    }
-
-    refreshTable();
-  }
-
-  document.getElementById("addBtn").addEventListener("click", addPerson);
-  document.getElementById("nextBtn").addEventListener("click", nextLead);
-
-  refreshTable();
-  setInterval(refreshTable, 5000);
+  loadPeople();
 </script>
 </body>
 </html>
