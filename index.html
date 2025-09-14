@@ -6,263 +6,128 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <style>
-    :root{
-      --bg:#f6f8fb; --card:#fff; --ink:#111; --muted:#5a6b7b;
-      --line:#e6e9ef; --accent:#2f67ff; --head:#0f172a; --row:#f0f5ff;
-      --danger:#d64545;
-    }
-    *{box-sizing:border-box}
-    body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
-    .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
-    h1{font-size:28px;margin:0 0 6px}
-    .sub{color:var(--muted)}
-    .bar{display:flex;gap:8px;margin:16px 0}
-    input[type=text]{height:40px;padding:0 12px;border:1px solid var(--line);border-radius:10px;min-width:300px;background:#fff}
-    button{height:40px;padding:0 14px;border:1px solid var(--line);border-radius:10px;background:#fff;cursor:pointer}
-    .primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-    table{width:100%;border-collapse:collapse}
-    thead th{background:var(--head);color:#fff;font-weight:600;padding:11px;font-size:14px;text-align:left}
-    tbody td{border-top:1px solid var(--line);padding:10px;vertical-align:middle}
-    tr.up{background:var(--row)}
-    .tag{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;border:1px solid var(--line);background:#fff}
-    .x{font-weight:800}
-    .x.black{color:#000}
-    .x.red{color:var(--danger)}
-    .muted{color:var(--muted)}
-    .right{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
-    .small{height:32px;font-size:12px}
+    body { font-family: Arial, sans-serif; background:#f6f8fb; margin:0; padding:20px; }
+    h1 { margin:0; }
+    .bar { margin:12px 0; display:flex; gap:8px; }
+    input { padding:6px; }
+    button { padding:6px 10px; cursor:pointer; }
+    table { width:100%; border-collapse:collapse; margin-top:16px; background:#fff; }
+    th, td { border:1px solid #ddd; padding:8px; text-align:left; vertical-align:middle; }
+    th { background:#0f172a; color:#fff; }
+    .blackX { color:black; font-weight:bold; }
+    .redX { color:red; font-weight:bold; }
+    .handle { cursor:grab; font-size:18px; text-align:center; }
+    .order { text-align:center; font-weight:bold; }
+    .btn-small { font-size:12px; padding:4px 6px; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>Reliable Superstore BDC Online Up List</h1>
-    <div class="sub"><span id="today"></span> • <b id="clock"></b></div>
+  <h1>Reliable Superstore BDC Online Up List</h1>
+  <div><span id="today"></span> • <span id="clock"></span></div>
 
-    <div class="bar">
-      <input id="nameInput" type="text" placeholder="Add team member name" />
-      <button class="primary" id="addBtn">Add</button>
-      <button id="nextBtn">Next Lead</button>
-      <button id="resetBtn">Reset</button>
-      <span class="muted" style="margin-left:auto">Tip: press <b>+</b> to advance.</span>
-    </div>
-
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th style="width:72px">Order</th>
-            <th style="width:260px">Name</th>
-            <th style="width:90px">Status</th>
-            <th style="width:70px">Up</th>
-            <th style="width:120px">Makeups</th>
-            <th style="width:110px">Leads</th>
-            <th style="width:120px">Last Lead</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="rows"></tbody>
-      </table>
-    </div>
+  <div class="bar">
+    <input id="nameInput" type="text" placeholder="Add team member name" />
+    <button id="addBtn">Add</button>
+    <button id="nextBtn">Next Lead (move X)</button>
+    <button id="resetBtn">Reset</button>
+    <button id="newDayBtn">New Day</button>
   </div>
 
-<script>
-/* ---------- Supabase config ---------- */
-const SUPABASE_URL = "https://imfzlhudhljathvkgkqf.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImltZnpsaHVkaGxqYXRodmtna3FmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc4MDAxMDUsImV4cCI6MjA3MzM3NjEwNX0.Bb-SUJMWfzVMHkdYuAgAD31wExcLuNazss6AJ11Z_VQ";
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  <table>
+    <thead>
+      <tr>
+        <th style="width:44px">≡</th>
+        <th>Order</th>
+        <th>Name</th>
+        <th>Status</th>
+        <th>Up</th>
+        <th>Leads</th>
+        <th>Last Lead</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
 
-/* ---------- Utilities ---------- */
-const $ = id => document.getElementById(id);
+  <script>
+    // === CONFIG ===
+    const SUPABASE_URL = "https://imfzlhudhljathvkgkqf.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-function titleCase(s){
-  return s.toLowerCase().replace(/\b\w/g,m=>m.toUpperCase());
-}
-function timeNow() {
-  // time only, like "3:41 PM"
-  return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-}
-function setClock(){
-  const d = new Date();
-  $('today').textContent = d.toLocaleDateString(undefined,{weekday:'long', month:'long', day:'numeric'});
-  $('clock').textContent = d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit', second:'2-digit'}) + " CST";
-}
-setInterval(setClock,1000); setClock();
+    const el = (id) => document.getElementById(id);
+    const tbody = el('tbody');
+    const nameInput = el('nameInput');
 
-/* ---------- Data ---------- */
-async function fetchPeople(){
-  const { data, error } = await sb.from('people').select('*').order('order', { ascending:true });
-  if(error){ console.error(error); return []; }
-  return data;
-}
+    // Time header
+    function tick(){
+      const d = new Date();
+      el('today').textContent = d.toLocaleDateString(undefined,{ weekday:'long', year:'numeric', month:'long', day:'numeric' });
+      el('clock').textContent = d.toLocaleTimeString();
+    }
+    setInterval(tick, 1000); tick();
 
-function firstHere(rows){
-  return rows.find(p => (p.status||'Here') === 'Here');
-}
-function nextHereAfter(rows, currentId){
-  if(!rows.length) return null;
-  const idx = rows.findIndex(r=>r.id===currentId);
-  for(let i=1;i<=rows.length;i++){
-    const j = (idx + i) % rows.length;
-    if((rows[j].status||'Here') === 'Here') return rows[j];
-  }
-  return null;
-}
+    // --- CRUD ---
+    async function fetchPeople(){
+      const { data, error } = await supabase.from('people').select('*').order('order', { ascending:true });
+      if(error) { console.error(error); return []; }
+      return data;
+    }
 
-/* ---------- Render ---------- */
-async function render(){
-  const rows = await fetchPeople();
-  const tbody = $('rows');
-  tbody.innerHTML = '';
+    async function addPerson(){
+      const name = nameInput.value.trim();
+      if(!name) return;
+      const fixed = name.toLowerCase().replace(/\b\w/g, m => m.toUpperCase());
+      await supabase.from('people').insert([{ name: fixed, status:"Here" }]);
+      nameInput.value = "";
+      loadPeople();
+    }
 
-  const up = rows.find(r=>r.is_up);
+    async function deletePerson(id){
+      await supabase.from('people').delete().eq('id', id);
+      loadPeople();
+    }
 
-  rows.forEach(p=>{
-    const tr = document.createElement('tr');
-    if(up && up.id===p.id) tr.classList.add('up');
+    async function moveXHere(id){
+      // clear all
+      await supabase.from('people').update({ is_up: false }).neq('id', id);
+      // set chosen
+      await supabase.from('people').update({ is_up: true }).eq('id', id);
+      loadPeople();
+    }
 
-    const tdOrder = `<td>${p.order ?? ''}</td>`;
-    const tdName  = `<td>${p.name ?? ''}</td>`;
-    const tdStat  = `<td><span class="tag">${p.status||'Here'}</span></td>`;
-    const tdUp    = `<td>${p.is_up ? '<span class="x black">X</span>' : ''}</td>`;
-    const tdMk    = `<td>${p.makeups>0 ? '<span class="x red">'+'X'.repeat(p.makeups)+'</span>' : ''}</td>`;
-    const tdLeads = `<td>${p.leads ?? 0}</td>`;
-    const tdLast  = `<td>${p.last_served ?? ''}</td>`;
+    async function loadPeople(){
+      const people = await fetchPeople();
+      tbody.innerHTML = "";
+      people.forEach((p,i)=>{
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td class="handle">≡</td>
+          <td class="order">${i+1}</td>
+          <td>${p.name}</td>
+          <td>${p.status}</td>
+          <td>${p.is_up ? '<span class="blackX">X</span>' : (p.makeups>0? '<span class="redX">X</span>':'')}</td>
+          <td>${p.leads||0}</td>
+          <td>${p.last_served||''}</td>
+          <td>
+            <button class="btn-small" onclick="deletePerson('${p.id}')">X</button>
+            <button class="btn-small" onclick="moveXHere('${p.id}')">Move X Here</button>
+          </td>`;
+        tbody.appendChild(tr);
+      });
+    }
 
-    const actions = document.createElement('td');
-    actions.className = 'right';
-    // Here/Gone toggle
-    const sBtn = document.createElement('button');
-    sBtn.className = 'small';
-    sBtn.textContent = (p.status||'Here')==='Here' ? 'Set Gone' : 'Set Here';
-    sBtn.onclick = async ()=>{
-      await sb.from('people').update({ status: (p.status||'Here')==='Here'?'Gone':'Here' }).eq('id',p.id);
-      render();
-    };
-    actions.appendChild(sBtn);
+    // --- Events ---
+    el('addBtn').onclick = addPerson;
+    el('nextBtn').onclick = ()=>alert("TODO: Next Lead logic");
+    el('resetBtn').onclick = ()=>alert("TODO: Reset logic");
+    el('newDayBtn').onclick = ()=>alert("TODO: New Day logic");
 
-    // Need Makeup
-    const mBtn = document.createElement('button');
-    mBtn.className = 'small';
-    mBtn.textContent = 'Need Makeup';
-    mBtn.onclick = async ()=>{
-      const newLeads = Math.max(0, (p.leads||0)-1);
-      await sb.from('people').update({ makeups: (p.makeups||0)+1, leads: newLeads }).eq('id',p.id);
-      render();
-    };
-    actions.appendChild(mBtn);
+    nameInput.addEventListener("keypress", (e)=>{
+      if(e.key==="Enter"){ addPerson(); }
+    });
 
-    tr.innerHTML = tdOrder + tdName + tdStat + tdUp + tdMk + tdLeads + tdLast;
-    tr.appendChild(actions);
-    tbody.appendChild(tr);
-  });
-}
-
-/* ---------- Core logic: Next Lead ---------- */
-async function giveLead(person){
-  await sb.from('people').update({
-    leads: (person.leads||0) + 1,
-    last_served: timeNow()
-  }).eq('id', person.id);
-}
-
-async function setUpPointer(currentId, nextId){
-  if(currentId){
-    await sb.from('people').update({ is_up:false }).eq('id', currentId);
-  }
-  if(nextId){
-    await sb.from('people').update({ is_up:true }).eq('id', nextId);
-  }
-}
-
-async function handleNextLead(){
-  const rows = await fetchPeople();
-  if(!rows.length) return;
-
-  // 1) Makeup has priority: first HERE with makeups > 0 (lowest order wins)
-  const makeup = rows.find(p => (p.makeups||0) > 0 && (p.status||'Here')==='Here');
-  if(makeup){
-    await giveLead(makeup);
-    await sb.from('people').update({ makeups: (makeup.makeups||0)-1 }).eq('id', makeup.id);
-    // DO NOT move the black X
-    render();
-    return;
-  }
-
-  // 2) No makeups -> give to current black X (if Here), then move X to next Here
-  let up = rows.find(p=>p.is_up);
-  if(!up){
-    // if none marked, set first HERE as up and stop (next press will award)
-    const f = firstHere(rows);
-    if(f){ await setUpPointer(null, f.id); }
-    render();
-    return;
-  }
-
-  // If current up is Gone, skip them: award to next HERE, then move X to the one after that
-  if((up.status||'Here')!=='Here'){
-    const nextHere = nextHereAfter(rows, up.id);
-    if(!nextHere){ render(); return; } // no one here
-    await giveLead(nextHere);
-    const after = nextHereAfter(rows, nextHere.id) || nextHere; // keep pointer stable if only one person
-    await setUpPointer(up.id, after.id);
-    render();
-    return;
-  }
-
-  // Normal: award to current up, then move pointer to next HERE
-  await giveLead(up);
-  const nxt = nextHereAfter(rows, up.id) || up;
-  await setUpPointer(up.id, nxt.id);
-  render();
-}
-
-/* ---------- Actions ---------- */
-$('addBtn').onclick = async ()=>{
-  const raw = $('nameInput').value.trim();
-  if(!raw) return;
-  const name = titleCase(raw);
-
-  const rows = await fetchPeople();
-  const maxOrder = rows.length ? Math.max(...rows.map(r=>r.order||0)) : 0;
-
-  await sb.from('people').insert({
-    name, status:'Here', is_up: rows.length===0, order: maxOrder+1,
-    leads:0, makeups:0, last_served:null
-  });
-  $('nameInput').value = '';
-  render();
-};
-
-$('nextBtn').onclick = handleNextLead;
-
-$('resetBtn').onclick = async ()=>{
-  const rows = await fetchPeople();
-  const first = firstHere(rows);
-  const updates = rows.map(r=>{
-    return sb.from('people').update({
-      leads:0, makeups:0, last_served:null, is_up:false
-    }).eq('id', r.id);
-  });
-  await Promise.all(updates);
-  if(first){ await sb.from('people').update({ is_up:true }).eq('id', first.id); }
-  render();
-};
-
-// "+" hotkey
-document.addEventListener('keydown', (e)=>{
-  if(e.key === '+' || (e.key==='=' && e.shiftKey)){ handleNextLead(); }
-});
-
-/* ---------- Realtime (if enabled), plus polling fallback ---------- */
-try {
-  sb.channel('public:people')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'people' }, () => render())
-    .subscribe();
-} catch(_) {}
-setInterval(render, 5000); // fallback polling
-
-render();
-</script>
+    loadPeople();
+  </script>
 </body>
 </html>
