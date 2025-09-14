@@ -48,8 +48,8 @@
         <th>Leads</th>
         <th>Last Lead</th>
         <th>Makeups</th>
-        <th>Schedule Today</th>
         <th>Actions</th>
+        <th>Schedule Today</th>
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
@@ -203,42 +203,41 @@
         <td>${p.leads||0}</td>
         <td>${fmtTime(p.last_served)}</td>
         <td class="center">${reds}</td>
-        <td><textarea onchange="onScheduleChange('${p.id}',this.value)">${p.schedule||""}</textarea></td>
         <td>
           <button onclick="onNeedMakeup('${p.id}')">Need Makeup</button>
           <button onclick="onSetAppt('${p.id}')">Set Appt</button>
           <button onclick="onMoveXHere('${p.id}')">X</button>
           <button onclick="onRemove('${p.id}')">Remove</button>
         </td>
+        <td><textarea onchange="onScheduleChange('${p.id}',this.value)">${p.schedule||""}</textarea></td>
       `;
       tbody.appendChild(tr);
     });
   }
 
   async function renderLeaderboard(){
-    const { data, error } = await supabase.from("appointments").select("person_id, created_at");
+    const { data: appts, error } = await supabase.from("appointments").select("person_id, created_at");
     if(error){ console.error(error); return; }
     const { data: people } = await supabase.from("people").select("id,name");
     let counts={};
-    data.forEach(a=>{
-      if(!counts[a.person_id]) counts[a.person_id]={count:0,last:a.created_at};
+    people.forEach(p=>{
+      counts[p.id]={count:0,last:null,name:p.name};
+    });
+    appts.forEach(a=>{
       counts[a.person_id].count++;
-      if(new Date(a.created_at)>new Date(counts[a.person_id].last)){
+      if(!counts[a.person_id].last || new Date(a.created_at)>new Date(counts[a.person_id].last)){
         counts[a.person_id].last=a.created_at;
       }
     });
-    let rows=Object.entries(counts).map(([pid,info])=>{
-      const person=people.find(p=>p.id===pid);
-      return {name:person?person.name:"?",count:info.count,last:new Date(info.last)};
-    });
-    rows.sort((a,b)=> b.count===a.count ? b.last-a.last : b.count-a.count );
+    let rows=Object.values(counts);
+    rows.sort((a,b)=> b.count===a.count ? (new Date(b.last||0)-new Date(a.last||0)) : b.count-a.count );
     leaderEl.innerHTML="";
     rows.forEach(r=>{
       const tr=document.createElement("tr");
       tr.innerHTML=`<td>${r.name}</td><td>${r.count}</td>`;
       leaderEl.appendChild(tr);
     });
-    apptTotalEl.textContent=data.length;
+    apptTotalEl.textContent=appts.length;
   }
 
   async function refresh(){
