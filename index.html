@@ -12,13 +12,11 @@
     input { padding:6px; }
     button { padding:6px 10px; cursor:pointer; }
     table { width:100%; border-collapse:collapse; margin-top:16px; background:#fff; }
-    th, td { border:1px solid #ddd; padding:8px; text-align:center; }
+    th, td { border:1px solid #ddd; padding:8px; text-align:left; }
     th { background:#0f172a; color:#fff; }
+    td.center { text-align:center; }
     .blackX { color:black; font-weight:bold; }
     .redX { color:red; font-weight:bold; }
-    .tag { display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; border:1px solid #ccc; }
-    .tag.here { background:#edfff5; color:#1f9d55; border-color:#b8eecf; }
-    .tag.gone { background:#fff5f5; color:#c92a2a; border-color:#ffd4d4; }
   </style>
 </head>
 <body>
@@ -42,7 +40,6 @@
         <th>Up</th>
         <th>Leads</th>
         <th>Last Lead</th>
-        <th>Actions</th>
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
@@ -51,170 +48,89 @@
 <script>
   // === CONFIG ===
   const SUPABASE_URL = "https://imfzlhudhljathvkgkqf.supabase.co";
-  const SUPABASE_KEY = "YOUR-ANON-KEY-HERE";
+  const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImltZnpsaHVkaGxqYXRodmtna3FmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc4MDAxMDUsImV4cCI6MjA3MzM3NjEwNX0.Bb-SUJMWfzVMHkdYuAgAD31wExcLuNazss6AJ11Z_VQ";
+
   const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  const tbody = document.getElementById('tbody');
-  const nameInput = document.getElementById('nameInput');
+  const tbody = document.getElementById("tbody");
+  const nameInput = document.getElementById("nameInput");
 
-  // Header time
-  function tick(){
+  // Clock + Date
+  function tick() {
     const d = new Date();
-    document.getElementById('today').textContent =
-      d.toLocaleDateString(undefined, { weekday:'long', year:'numeric', month:'long', day:'numeric' });
-    document.getElementById('clock').textContent =
-      d.toLocaleTimeString(undefined,{ hour:'numeric', minute:'2-digit', second:'2-digit' });
+    document.getElementById("today").textContent = d.toLocaleDateString(undefined, { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+    document.getElementById("clock").textContent = d.toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit', second:'2-digit' });
   }
-  setInterval(tick,1000); tick();
+  setInterval(tick, 1000); tick();
 
-  // ------- CRUD HELPERS -------
-  async function fetchPeople(){
-    const { data, error } = await supabase
-      .from('people').select('*').order('order', { ascending:true });
-    if(error){ console.error(error); return []; }
-    return data || [];
-  }
-
-  async function fetchMakeups(){
-    const { data, error } = await supabase
-      .from('makeups').select('*').order('created_at', { ascending:true });
-    if(error){ console.error(error); return []; }
-    return data || [];
+  // Render row
+  function renderRow(p) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${p.order}</td>
+      <td>${p.name}</td>
+      <td>${p.status}</td>
+      <td class="center">${p.is_up ? '<span class="blackX">X</span>' : ''}${p.makeups > 0 ? '<span class="redX">X</span>'.repeat(p.makeups) : ''}</td>
+      <td>${p.leads}</td>
+      <td>${p.last_served || ""}</td>
+    `;
+    return tr;
   }
 
-  async function render(){
-    tbody.innerHTML = '';
-    const people = await fetchPeople();
-    const makeups = await fetchMakeups();
-
-    people.forEach(p => {
-      const tr = document.createElement('tr');
-
-      // Up column
-      let upDisplay = '';
-      if(p.is_up) upDisplay = `<span class="blackX">X</span>`;
-      const muCount = makeups.filter(m => m.person_id === p.id).length;
-      if(muCount > 0) upDisplay += ` <span class="redX">${'X'.repeat(muCount)}</span>`;
-
-      tr.innerHTML = `
-        <td>${p.order}</td>
-        <td>${p.name}</td>
-        <td><span class="tag ${p.status.toLowerCase()}">${p.status}</span></td>
-        <td>${upDisplay}</td>
-        <td>${p.leads}</td>
-        <td>${p.last_served || ''}</td>
-        <td>
-          <button onclick="setGone('${p.id}')">Set Gone</button>
-          <button onclick="needMakeup('${p.id}')">Need Makeup</button>
-          <button onclick="setAppt('${p.id}')">Set Appt</button>
-          <button onclick="moveXHere('${p.id}')">Move X Here</button>
-          <button onclick="removePerson('${p.id}')">X</button>
-        </td>
-      `;
-      tbody.appendChild(tr);
-    });
+  // Load table
+  async function loadPeople() {
+    const { data, error } = await supabase.from("people").select("*").order("order", { ascending:true });
+    if (error) {
+      console.error("Load error:", error);
+      return;
+    }
+    tbody.innerHTML = "";
+    if (data) {
+      data.forEach(p => tbody.appendChild(renderRow(p)));
+    }
   }
 
-  // ------- ACTIONS -------
-  async function addPerson(){
+  // Add person
+  async function addPerson() {
     const name = nameInput.value.trim();
-    if(!name) return;
-    const people = await fetchPeople();
-    const nextOrder = people.length ? Math.max(...people.map(p=>p.order))+1 : 1;
-    await supabase.from('people').insert([
-      { name, status:'Here', order:nextOrder, leads:0, is_up:false }
+    if (!name) return;
+    const fixed = name.toLowerCase().replace(/\b\w/g, (m) => m.toUpperCase());
+
+    const { data, error } = await supabase.from("people").insert([
+      {
+        name: fixed,
+        status: "Here",
+        is_up: false,
+        order: 0,
+        leads: 0,
+        makeups: 0,
+        last_served: null
+      }
     ]);
-    nameInput.value = '';
-    render();
-  }
 
-  async function setGone(id){
-    await supabase.from('people').update({ status:'Gone' }).eq('id', id);
-    render();
-  }
-
-  async function needMakeup(id){
-    await supabase.from('makeups').insert([{ person_id:id }]);
-    render();
-  }
-
-  async function setAppt(id){
-    await supabase.from('people').update({
-      appointments: supabase.sql`appointments + 1`,
-      last_appt_time: new Date().toISOString()
-    }).eq('id', id);
-    render();
-  }
-
-  async function moveXHere(id){
-    // clear all X first
-    await supabase.from('people').update({ is_up:false });
-    await supabase.from('people').update({ is_up:true }).eq('id', id);
-    render();
-  }
-
-  async function removePerson(id){
-    await supabase.from('people').delete().eq('id', id);
-    await supabase.from('makeups').delete().eq('person_id', id);
-    render();
-  }
-
-  async function nextLead(){
-    let makeups = await fetchMakeups();
-    if(makeups.length > 0){
-      const mu = makeups[0];
-      await supabase.from('makeups').delete().eq('id', mu.id);
-      await supabase.from('people').update({
-        leads: supabase.sql`leads + 1`,
-        last_served: new Date().toLocaleTimeString()
-      }).eq('id', mu.person_id);
-      render();
-      return;
+    if (error) {
+      console.error("Insert error:", error);
+    } else {
+      console.log("Inserted:", data);
+      nameInput.value = "";
+      await loadPeople();
     }
-
-    const people = await fetchPeople();
-    const current = people.find(p=>p.is_up);
-    if(!current){
-      if(people.length) await supabase.from('people').update({ is_up:true }).eq('id', people[0].id);
-      render();
-      return;
-    }
-
-    // give lead
-    await supabase.from('people').update({
-      leads: supabase.sql`leads + 1`,
-      last_served: new Date().toLocaleTimeString(),
-      is_up:false
-    }).eq('id', current.id);
-
-    // move X to next person
-    const idx = people.findIndex(p=>p.id===current.id);
-    const nextIdx = (idx+1)%people.length;
-    await supabase.from('people').update({ is_up:true }).eq('id', people[nextIdx].id);
-
-    render();
   }
 
-  async function resetAll(){
-    await supabase.from('people').update({ leads:0, is_up:false, last_served:null });
-    await supabase.from('makeups').delete().neq('id','0000');
-    render();
+  // Reset table (just clears DB for now)
+  async function resetList() {
+    const { error } = await supabase.from("people").delete().neq("id", 0);
+    if (error) console.error("Reset error:", error);
+    await loadPeople();
   }
 
-  async function newDay(){
-    await supabase.from('people').update({ leads:0, is_up:false, appointments:0, last_served:null });
-    await supabase.from('makeups').delete().neq('id','0000');
-    render();
-  }
+  // Event listeners
+  document.getElementById("addBtn").addEventListener("click", addPerson);
+  document.getElementById("resetBtn").addEventListener("click", resetList);
+  nameInput.addEventListener("keypress", (e) => { if (e.key === "Enter") addPerson(); });
 
-  // ------- EVENTS -------
-  document.getElementById('addBtn').onclick = addPerson;
-  document.getElementById('nextBtn').onclick = nextLead;
-  document.getElementById('resetBtn').onclick = resetAll;
-  document.getElementById('newDayBtn').onclick = newDay;
-  nameInput.addEventListener("keypress", e => { if(e.key==="Enter") addPerson(); });
-
-  render();
+  // Initial load
+  loadPeople();
 </script>
 </body>
 </html>
