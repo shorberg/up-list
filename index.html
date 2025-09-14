@@ -6,29 +6,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <style>
-    body { font-family: Arial, sans-serif; background:#f6f8fb; margin:0; padding:20px; }
-    h1 { margin:0; }
-    .bar { margin:12px 0; display:flex; gap:8px; }
-    input { padding:6px; }
-    button { padding:6px 10px; cursor:pointer; }
-    table { width:100%; border-collapse:collapse; margin-top:16px; background:#fff; }
-    th, td { border:1px solid #ddd; padding:8px; text-align:left; }
-    th { background:#0f172a; color:#fff; }
-    td.center { text-align:center; }
-    .blackX { color:black; font-weight:bold; }
-    .redX { color:red; font-weight:bold; }
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f6f8fb; }
+    h1 { margin-bottom: 10px; }
+    .bar { margin-bottom: 15px; }
+    input, button { padding: 6px 10px; margin-right: 6px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    thead { background: #0f172a; color: #fff; }
+    .up { font-weight: bold; }
+    .x { font-weight: bold; color: black; }
   </style>
 </head>
 <body>
   <h1>Reliable Superstore BDC Online Up List</h1>
-  <div><span id="today"></span> • <span id="clock"></span></div>
 
   <div class="bar">
     <input id="nameInput" type="text" placeholder="Add team member name" />
     <button id="addBtn">Add</button>
     <button id="nextBtn">Next Lead (move X)</button>
-    <button id="resetBtn">Reset</button>
-    <button id="newDayBtn">New Day</button>
   </div>
 
   <table>
@@ -36,7 +31,6 @@
       <tr>
         <th>Order</th>
         <th>Name</th>
-        <th>Status</th>
         <th>Up</th>
         <th>Leads</th>
         <th>Last Lead</th>
@@ -49,88 +43,90 @@
   // === CONFIG ===
   const SUPABASE_URL = "https://imfzlhudhljathvkgkqf.supabase.co";
   const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImltZnpsaHVkaGxqYXRodmtna3FmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc4MDAxMDUsImV4cCI6MjA3MzM3NjEwNX0.Bb-SUJMWfzVMHkdYuAgAD31wExcLuNazss6AJ11Z_VQ";
-
   const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
   const tbody = document.getElementById("tbody");
   const nameInput = document.getElementById("nameInput");
 
-  // Clock + Date
-  function tick() {
-    const d = new Date();
-    document.getElementById("today").textContent = d.toLocaleDateString(undefined, { weekday:'long', year:'numeric', month:'long', day:'numeric' });
-    document.getElementById("clock").textContent = d.toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit', second:'2-digit' });
+  async function fetchPeople() {
+    const { data, error } = await supabase
+      .from("people")
+      .select("*")
+      .order("order", { ascending: true });
+    if (error) { console.error(error); return []; }
+    return data || [];
   }
-  setInterval(tick, 1000); tick();
 
-  // Render row
   function renderRow(p) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${p.order}</td>
       <td>${p.name}</td>
-      <td>${p.status}</td>
-      <td class="center">${p.is_up ? '<span class="blackX">X</span>' : ''}${p.makeups > 0 ? '<span class="redX">X</span>'.repeat(p.makeups) : ''}</td>
-      <td>${p.leads}</td>
-      <td>${p.last_served || ""}</td>
+      <td>${p.is_up ? '<span class="x">X</span>' : ''}</td>
+      <td>${p.leads || 0}</td>
+      <td>${p.last_served ? new Date(p.last_served).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ''}</td>
     `;
     return tr;
   }
 
-  // Load table
-  async function loadPeople() {
-    const { data, error } = await supabase.from("people").select("*").order("order", { ascending:true });
-    if (error) {
-      console.error("Load error:", error);
-      return;
-    }
+  async function refreshTable() {
     tbody.innerHTML = "";
-    if (data) {
-      data.forEach(p => tbody.appendChild(renderRow(p)));
-    }
+    const people = await fetchPeople();
+    people.forEach(p => tbody.appendChild(renderRow(p)));
   }
 
-  // Add person
   async function addPerson() {
     const name = nameInput.value.trim();
     if (!name) return;
-    const fixed = name.toLowerCase().replace(/\b\w/g, (m) => m.toUpperCase());
 
-    const { data, error } = await supabase.from("people").insert([
-      {
-        name: fixed,
-        status: "Here",
-        is_up: false,
-        order: 0,
-        leads: 0,
-        makeups: 0,
-        last_served: null
-      }
+    const people = await fetchPeople();
+    const nextOrder = people.length ? Math.max(...people.map(p => p.order)) + 1 : 1;
+
+    const fixed = name.toLowerCase().replace(/\b\w/g, m => m.toUpperCase());
+
+    await supabase.from("people").insert([
+      { name: fixed, order: nextOrder, is_up: people.length === 0, leads: 0 }
     ]);
 
-    if (error) {
-      console.error("Insert error:", error);
-    } else {
-      console.log("Inserted:", data);
-      nameInput.value = "";
-      await loadPeople();
+    nameInput.value = "";
+    refreshTable();
+  }
+
+  async function nextLead() {
+    const people = await fetchPeople();
+    if (people.length === 0) return;
+
+    // find current "up"
+    const current = people.find(p => p.is_up);
+    if (!current) {
+      // no one marked as up, set first person
+      await supabase.from("people").update({ is_up: true }).eq("id", people[0].id);
+      return refreshTable();
     }
+
+    // give current person a lead
+    await supabase.from("people").update({
+      leads: (current.leads || 0) + 1,
+      last_served: new Date().toISOString(),
+      is_up: false
+    }).eq("id", current.id);
+
+    // find next in order
+    let idx = people.findIndex(p => p.id === current.id);
+    let nextIdx = (idx + 1) % people.length;
+    let next = people[nextIdx];
+
+    // mark next person as up
+    await supabase.from("people").update({ is_up: true }).eq("id", next.id);
+
+    refreshTable();
   }
 
-  // Reset table (just clears DB for now)
-  async function resetList() {
-    const { error } = await supabase.from("people").delete().neq("id", 0);
-    if (error) console.error("Reset error:", error);
-    await loadPeople();
-  }
-
-  // Event listeners
   document.getElementById("addBtn").addEventListener("click", addPerson);
-  document.getElementById("resetBtn").addEventListener("click", resetList);
-  nameInput.addEventListener("keypress", (e) => { if (e.key === "Enter") addPerson(); });
+  document.getElementById("nextBtn").addEventListener("click", nextLead);
 
-  // Initial load
-  loadPeople();
+  refreshTable();
+  setInterval(refreshTable, 5000); // refresh every 5s
 </script>
 </body>
 </html>
