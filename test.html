@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Supabase Realtime Test</title>
+  <script src="https://unpkg.com/@supabase/supabase-js"></script>
+</head>
+<body>
+  <h1>Supabase Realtime Test</h1>
+
+  <input type="text" id="nameInput" placeholder="Enter name">
+  <button onclick="addPerson()">Add Person</button>
+
+  <ul id="peopleList"></ul>
+
+  <script>
+    const SUPABASE_URL = "https://imfzlhudhljathvkgkqf.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImltZnpsaHVkaGxqYXRodmtna3FmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc4MDAxMDUsImV4cCI6MjA3MzM3NjEwNX0.Bb-SUJMWfzVMHkdYuAgAD31wExcLuNazss6AJ11Z_VQ";
+
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    async function addPerson() {
+      const name = document.getElementById("nameInput").value;
+      if (!name) return alert("Enter a name first!");
+
+      const { error } = await supabase
+        .from("people")
+        .insert([{ name, status: "Here" }]);
+
+      if (error) {
+        alert("Error: " + error.message);
+      } else {
+        document.getElementById("nameInput").value = "";
+      }
+    }
+
+    async function loadPeople() {
+      const { data, error } = await supabase
+        .from("people")
+        .select("*")
+        .order("inserted_at", { ascending: true });
+
+      if (error) {
+        console.error(error);
+        return;
+      }
+
+      renderPeople(data);
+    }
+
+    function renderPeople(data) {
+      const list = document.getElementById("peopleList");
+      list.innerHTML = "";
+      data.forEach(person => {
+        const li = document.createElement("li");
+        li.textContent = `${person.name} (${person.status})`;
+        list.appendChild(li);
+      });
+    }
+
+    // Load current people
+    loadPeople();
+
+    // Subscribe to realtime changes
+    supabase
+      .channel("public:people")
+      .on("postgres_changes", { event: "*", schema: "public", table: "people" }, payload => {
+        console.log("Realtime update:", payload);
+        loadPeople(); // reload the list anytime a row changes
+      })
+      .subscribe();
+  </script>
+</body>
+</html>
