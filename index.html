@@ -9,21 +9,27 @@
     body { font-family: Arial, sans-serif; background:#f6f8fb; margin:0; padding:20px; }
     h1 { margin:0 0 8px; }
     .bar { margin:12px 0; display:flex; gap:8px; flex-wrap:wrap; }
-    input { padding:6px 10px; height:36px; border:1px solid #ccc; border-radius:8px; }
-    button { padding:6px 12px; height:36px; border:1px solid #ccc; border-radius:8px; background:#fff; cursor:pointer; }
+    input, select, textarea { padding:6px; border:1px solid #ccc; border-radius:6px; }
+    textarea { resize:none; height:28px; }
+    button { padding:6px 10px; border:1px solid #ccc; border-radius:6px; background:#fff; cursor:pointer; }
     button.primary { background:#2f67ff; color:#fff; border-color:#2f67ff; }
     table { width:100%; border-collapse:collapse; background:#fff; margin-top:12px; }
-    th, td { border:1px solid #ddd; padding:8px; text-align:left; vertical-align:middle; }
+    th, td { border:1px solid #ddd; padding:6px; text-align:left; vertical-align:middle; }
     thead th { background:#0f172a; color:#fff; }
     td.center { text-align:center; }
     .blackX { color:black; font-weight:bold; }
     .redX { color:red; font-weight:bold; }
     .muted { color:#5b6b7a; }
+    .card { margin-top:20px; background:#fff; border:1px solid #ccc; border-radius:8px; overflow:hidden; }
+    .card th { background:#2f2f2f; }
   </style>
 </head>
 <body>
   <h1>Reliable Superstore BDC Online Up List</h1>
-  <div class="muted"><span id="today"></span> • <span id="clock"></span></div>
+  <div class="muted">
+    <span id="today"></span> • <span id="clock"></span> • 
+    Total Appointments Today: <b id="apptTotal">0</b>
+  </div>
 
   <div class="bar">
     <input id="nameInput" type="text" placeholder="Add team member name" />
@@ -35,17 +41,31 @@
   <table>
     <thead>
       <tr>
-        <th style="width:70px;">Order</th>
-        <th style="width:220px;">Name</th>
-        <th style="width:70px;">Up</th>
-        <th style="width:90px;">Leads</th>
-        <th style="width:120px;">Last Lead</th>
-        <th style="width:120px;">Makeups</th>
+        <th>Order</th>
+        <th>Name</th>
+        <th>Status</th>
+        <th>Up</th>
+        <th>Leads</th>
+        <th>Last Lead</th>
+        <th>Makeups</th>
+        <th>Schedule Today</th>
         <th>Actions</th>
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
   </table>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Leaderboard</th>
+          <th>Appointments Set</th>
+        </tr>
+      </thead>
+      <tbody id="leaderboard"></tbody>
+    </table>
+  </div>
 
 <script>
   // === CONFIG ===
@@ -54,9 +74,10 @@
   const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
   const tbody = document.getElementById("tbody");
-  const nameInput = document.getElementById("nameInput");
+  const leaderEl = document.getElementById("leaderboard");
+  const apptTotalEl = document.getElementById("apptTotal");
 
-  // Live clock
+  // Clock
   function tick(){
     const d = new Date();
     document.getElementById("today").textContent =
@@ -66,198 +87,175 @@
   }
   setInterval(tick, 1000); tick();
 
-  // ------- DB helpers -------
+  // Helpers
   async function fetchPeople() {
-    const { data, error } = await supabase
-      .from("people")
-      .select("*")
-      .order("order", { ascending: true });
-    if (error) { console.error("fetchPeople error:", error); return []; }
+    const { data, error } = await supabase.from("people").select("*").order("order",{ascending:true});
+    if (error) { console.error(error); return []; }
     return data || [];
   }
-
-  async function fetchOpenMakeups() {
-    const { data, error } = await supabase
-      .from("makeups")
-      .select("id, person_id, created_at")
-      .order("created_at", { ascending: true });
-    if (error) { console.error("fetchOpenMakeups error:", error); return []; }
+  async function fetchMakeups() {
+    const { data } = await supabase.from("makeups").select("*").order("created_at",{ascending:true});
     return data || [];
   }
-
-  // Count red Xs by person_id from makeup rows
   function buildMakeupCountMap(makeups) {
     const map = new Map();
-    for (const m of makeups) {
-      map.set(m.person_id, (map.get(m.person_id) || 0) + 1);
-    }
+    makeups.forEach(m => map.set(m.person_id, (map.get(m.person_id)||0)+1));
     return map;
   }
-
-  // ------- UI render -------
   function fmtTime(ts) {
-    if (!ts) return "";
-    const d = new Date(ts);
-    if (isNaN(d.getTime())) return ts; // keep as-is if not ISO
-    return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    if(!ts) return "";
+    return new Date(ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   }
 
-  function renderTable(people, muMap) {
-    tbody.innerHTML = "";
-    for (const p of people) {
-      const tr = document.createElement("tr");
-      const muCount = muMap.get(p.id) || 0;
-      const upCell = p.is_up ? '<span class="blackX">X</span>' : "";
-      const red = muCount > 0 ? `<span class="redX">${"X".repeat(muCount)}</span>` : "";
+  // Actions
+  async function addPerson(){
+    const raw = document.getElementById("nameInput").value.trim();
+    if(!raw) return;
+    const fixed = raw.toLowerCase().replace(/\b\w/g, m=>m.toUpperCase());
+    const people = await fetchPeople();
+    const nextOrder = people.length? Math.max(...people.map(p=>p.order||0))+1:1;
+    await supabase.from("people").insert([{
+      name:fixed,status:"Here",is_up:people.length===0,order:nextOrder,
+      leads:0,last_served:null,schedule:""
+    }]);
+    document.getElementById("nameInput").value="";
+    refresh();
+  }
+  async function onNeedMakeup(id){
+    const { data: person } = await supabase.from("people").select("leads").eq("id",id).single();
+    await supabase.from("people").update({leads:Math.max(0,(person.leads||0)-1)}).eq("id",id);
+    await supabase.from("makeups").insert([{person_id:id}]);
+    refresh();
+  }
+  async function onMoveXHere(id){
+    await supabase.from("people").update({is_up:false}).neq("id",id);
+    await supabase.from("people").update({is_up:true}).eq("id",id);
+    refresh();
+  }
+  async function onRemove(id){
+    await supabase.from("makeups").delete().eq("person_id",id);
+    await supabase.from("people").delete().eq("id",id);
+    refresh();
+  }
+  async function onStatusChange(id,val){
+    await supabase.from("people").update({status:val}).eq("id",id);
+    refresh();
+  }
+  async function onScheduleChange(id,val){
+    await supabase.from("people").update({schedule:val}).eq("id",id);
+  }
+  async function onSetAppt(id){
+    await supabase.from("appointments").insert([{person_id:id}]);
+    refresh();
+  }
 
-      tr.innerHTML = `
+  async function nextLead(){
+    const [people,makeups] = await Promise.all([fetchPeople(),fetchMakeups()]);
+    if(!people.length) return;
+    if(makeups.length>0){
+      const mu = makeups[0];
+      const person = people.find(p=>p.id===mu.person_id);
+      await supabase.from("people").update({
+        leads:(person.leads||0)+1,last_served:new Date().toISOString()
+      }).eq("id",mu.person_id);
+      await supabase.from("makeups").delete().eq("id",mu.id);
+      return refresh();
+    }
+    const current = people.find(p=>p.is_up);
+    if(!current){
+      await supabase.from("people").update({is_up:true}).eq("id",people[0].id);
+      return refresh();
+    }
+    await supabase.from("people").update({
+      leads:(current.leads||0)+1,last_served:new Date().toISOString(),is_up:false
+    }).eq("id",current.id);
+    const idx = people.findIndex(p=>p.id===current.id);
+    const nextIdx=(idx+1)%people.length;
+    await supabase.from("people").update({is_up:true}).eq("id",people[nextIdx].id);
+    refresh();
+  }
+
+  async function resetAll(){
+    await supabase.from("people").update({leads:0,last_served:null,is_up:false,schedule:""});
+    await supabase.from("makeups").delete().neq("id","00000000-0000-0000-0000-000000000000");
+    await supabase.from("appointments").delete().neq("id","00000000-0000-0000-0000-000000000000");
+    refresh();
+  }
+
+  // Render
+  function renderTable(people,muMap){
+    tbody.innerHTML="";
+    people.forEach(p=>{
+      const tr=document.createElement("tr");
+      const muCount=muMap.get(p.id)||0;
+      const up=p.is_up?'<span class="blackX">X</span>':"";
+      const reds=muCount>0?'<span class="redX">'+"X".repeat(muCount)+'</span>':"";
+      tr.innerHTML=`
         <td>${p.order}</td>
         <td>${p.name}</td>
-        <td class="center">${upCell}</td>
-        <td>${p.leads || 0}</td>
+        <td>
+          <select onchange="onStatusChange('${p.id}',this.value)">
+            <option ${p.status==="Here"?"selected":""}>Here</option>
+            <option ${p.status==="Gone"?"selected":""}>Gone</option>
+          </select>
+        </td>
+        <td class="center">${up}</td>
+        <td>${p.leads||0}</td>
         <td>${fmtTime(p.last_served)}</td>
-        <td class="center">${red}</td>
+        <td class="center">${reds}</td>
+        <td><textarea onchange="onScheduleChange('${p.id}',this.value)">${p.schedule||""}</textarea></td>
         <td>
           <button onclick="onNeedMakeup('${p.id}')">Need Makeup</button>
-          <button onclick="onMoveXHere('${p.id}')">Move X Here</button>
+          <button onclick="onSetAppt('${p.id}')">Set Appt</button>
+          <button onclick="onMoveXHere('${p.id}')">X</button>
           <button onclick="onRemove('${p.id}')">Remove</button>
         </td>
       `;
       tbody.appendChild(tr);
-    }
+    });
   }
 
-  async function refresh() {
-    const [people, makeups] = await Promise.all([fetchPeople(), fetchOpenMakeups()]);
-    const muMap = buildMakeupCountMap(makeups);
-    renderTable(people, muMap);
+  async function renderLeaderboard(){
+    const { data, error } = await supabase.from("appointments").select("person_id, created_at");
+    if(error){ console.error(error); return; }
+    const { data: people } = await supabase.from("people").select("id,name");
+    let counts={};
+    data.forEach(a=>{
+      if(!counts[a.person_id]) counts[a.person_id]={count:0,last:a.created_at};
+      counts[a.person_id].count++;
+      if(new Date(a.created_at)>new Date(counts[a.person_id].last)){
+        counts[a.person_id].last=a.created_at;
+      }
+    });
+    let rows=Object.entries(counts).map(([pid,info])=>{
+      const person=people.find(p=>p.id===pid);
+      return {name:person?person.name:"?",count:info.count,last:new Date(info.last)};
+    });
+    rows.sort((a,b)=> b.count===a.count ? b.last-a.last : b.count-a.count );
+    leaderEl.innerHTML="";
+    rows.forEach(r=>{
+      const tr=document.createElement("tr");
+      tr.innerHTML=`<td>${r.name}</td><td>${r.count}</td>`;
+      leaderEl.appendChild(tr);
+    });
+    apptTotalEl.textContent=data.length;
   }
 
-  // ------- Actions -------
-  async function addPerson() {
-    const raw = nameInput.value.trim();
-    if (!raw) return;
-    const fixed = raw.toLowerCase().replace(/\b\w/g, m => m.toUpperCase());
-
-    const people = await fetchPeople();
-    const nextOrder = people.length ? Math.max(...people.map(p => p.order || 0)) + 1 : 1;
-
-    // If nobody is up yet, first added gets the black X
-    const anyUp = people.some(p => p.is_up === true);
-
-    const { error } = await supabase.from("people").insert([{
-      name: fixed,
-      status: "Here",
-      is_up: !anyUp && people.length === 0, // first person gets X
-      order: nextOrder,
-      leads: 0,
-      last_served: null
-    }]);
-
-    if (error) { console.error("addPerson error:", error); }
-    nameInput.value = "";
-    refresh();
+  async function refresh(){
+    const [people,makeups]=await Promise.all([fetchPeople(),fetchMakeups()]);
+    const muMap=buildMakeupCountMap(makeups);
+    renderTable(people,muMap);
+    renderLeaderboard();
   }
 
-  async function onNeedMakeup(personId) {
-    // Decrement their leads by 1 (but not below 0), then add a makeup row
-    const { data: person, error: selErr } = await supabase
-      .from("people").select("leads").eq("id", personId).single();
-    if (selErr) { console.error("needMakeup select error:", selErr); return; }
+  // Wire
+  document.getElementById("addBtn").onclick=addPerson;
+  document.getElementById("nextBtn").onclick=nextLead;
+  document.getElementById("resetBtn").onclick=resetAll;
+  document.getElementById("nameInput").addEventListener("keydown",e=>{if(e.key==="Enter")addPerson();});
 
-    const newLeads = Math.max(0, (person?.leads || 0) - 1);
-    const u1 = await supabase.from("people").update({ leads: newLeads }).eq("id", personId);
-    if (u1.error) { console.error("needMakeup update error:", u1.error); return; }
-
-    const ins = await supabase.from("makeups").insert([{ person_id: personId }]);
-    if (ins.error) { console.error("makeups insert error:", ins.error); }
-    refresh();
-  }
-
-  async function onMoveXHere(personId) {
-    // Clear existing X, then set on requested person
-    const u1 = await supabase.from("people").update({ is_up: false }).not("id", "is", null);
-    if (u1.error) { console.error("clear X error:", u1.error); }
-    const u2 = await supabase.from("people").update({ is_up: true }).eq("id", personId);
-    if (u2.error) { console.error("set X error:", u2.error); }
-    refresh();
-  }
-
-  async function onRemove(personId) {
-    // Remove person and their queued makeups
-    const d1 = await supabase.from("makeups").delete().eq("person_id", personId);
-    if (d1.error) console.error("delete makeups error:", d1.error);
-    const d2 = await supabase.from("people").delete().eq("id", personId);
-    if (d2.error) console.error("delete person error:", d2.error);
-    refresh();
-  }
-
-  async function nextLead() {
-    const [people, makeups] = await Promise.all([fetchPeople(), fetchOpenMakeups()]);
-    if (people.length === 0) return;
-
-    // 1) Serve makeups first (strict FIFO by created_at)
-    if (makeups.length > 0) {
-      const mu = makeups[0]; // oldest
-      const give = await supabase.from("people").update({
-        leads: (people.find(p => p.id === mu.person_id)?.leads || 0) + 1,
-        last_served: new Date().toISOString()
-      }).eq("id", mu.person_id);
-      if (give.error) { console.error("makeup serve error:", give.error); return; }
-
-      const del = await supabase.from("makeups").delete().eq("id", mu.id);
-      if (del.error) { console.error("makeup delete error:", del.error); }
-      // Do NOT move black X when serving makeup
-      return refresh();
-    }
-
-    // 2) No makeups → normal rotation
-    let current = people.find(p => p.is_up);
-    if (!current) {
-      // set first person as up and stop; next click will give them a lead
-      const setFirst = await supabase.from("people").update({ is_up: true }).eq("id", people[0].id);
-      if (setFirst.error) console.error("set first up error:", setFirst.error);
-      return refresh();
-    }
-
-    // Give current their lead and timestamp, clear X
-    const upIdx = people.findIndex(p => p.id === current.id);
-    const u1 = await supabase.from("people").update({
-      leads: (current.leads || 0) + 1,
-      last_served: new Date().toISOString(),
-      is_up: false
-    }).eq("id", current.id);
-    if (u1.error) { console.error("update current error:", u1.error); return; }
-
-    // Move X to next by order (wrap)
-    const nextIdx = (upIdx + 1) % people.length;
-    const u2 = await supabase.from("people").update({ is_up: true }).eq("id", people[nextIdx].id);
-    if (u2.error) { console.error("update next error:", u2.error); }
-    refresh();
-  }
-
-  async function resetAll() {
-    // Clear all counts, last_served, X state; clear all makeups
-    const u = await supabase.from("people")
-      .update({ leads: 0, last_served: null, is_up: false })
-      .not("id","is", null);
-    if (u.error) console.error("reset people error:", u.error);
-
-    const d = await supabase.from("makeups").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-    if (d.error) console.error("reset makeups error:", d.error);
-
-    refresh();
-  }
-
-  // ------- Wire up -------
-  document.getElementById("addBtn").onclick = addPerson;
-  document.getElementById("nextBtn").onclick = nextLead;
-  document.getElementById("resetBtn").onclick = resetAll;
-  nameInput.addEventListener("keydown", e => { if (e.key === "Enter") addPerson(); });
-
-  // Initial load + light polling to stay in sync across browsers
   refresh();
-  setInterval(refresh, 5000);
+  setInterval(refresh,5000);
 </script>
 </body>
 </html>
