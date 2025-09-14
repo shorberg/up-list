@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Reliable Superstore BDC Online Up List</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f6f8fb; margin:0; padding:20px; }
+    h1 { margin:0; }
+    .bar { margin:12px 0; display:flex; gap:8px; }
+    input { padding:6px; }
+    button { padding:6px 10px; cursor:pointer; }
+    table { width:100%; border-collapse:collapse; margin-top:16px; background:#fff; }
+    th, td { border:1px solid #ddd; padding:8px; text-align:left; }
+    th { background:#0f172a; color:#fff; }
+    td.center { text-align:center; }
+    .blackX { color:black; font-weight:bold; }
+    .redX { color:red; font-weight:bold; }
+  </style>
+</head>
+<body>
+  <h1>Reliable Superstore BDC Online Up List</h1>
+  <div><span id="today"></span> • <span id="clock"></span></div>
+
+  <div class="bar">
+    <input id="nameInput" type="text" placeholder="Add team member name" />
+    <button id="addBtn">Add</button>
+    <button id="nextBtn">Next Lead</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Order</th>
+        <th>Name</th>
+        <th>Status</th>
+        <th>Up</th>
+        <th>Makeups</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+<script>
+  // --- CONFIG ---
+  const SUPABASE_URL = "https://imfzlhudhljathvkgkqf.supabase.co";
+  const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImltZnpsaHVkaGxqYXRodmtna3FmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc4MDAxMDUsImV4cCI6MjA3MzM3NjEwNX0.Bb-SUJMWfzVMHkdYuAgAD31wExcLuNazss6AJ11Z_VQ";
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  const tbody = document.getElementById('tbody');
+  const nameInput = document.getElementById('nameInput');
+
+  // Clock
+  function tick() {
+    const d = new Date();
+    document.getElementById('today').textContent = d.toLocaleDateString();
+    document.getElementById('clock').textContent = d.toLocaleTimeString();
+  }
+  setInterval(tick, 1000); tick();
+
+  // Fetch and render people
+  async function fetchPeople() {
+    const { data, error } = await supabase.from('people').select('*').order('order', { ascending:true });
+    if (error) { console.error(error); return; }
+    renderTable(data);
+  }
+
+  function renderTable(rows) {
+    tbody.innerHTML = '';
+    rows.forEach(row => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${row.order}</td>
+        <td>${row.name}</td>
+        <td>${row.status}</td>
+        <td class="center">${row.is_up ? '<span class="blackX">X</span>' : ''}</td>
+        <td class="center">${row.makeups > 0 ? '<span class="redX">X</span>' : ''}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  // Add person
+  async function addPerson() {
+    const name = nameInput.value.trim();
+    if (!name) return;
+    await supabase.from('people').insert([{ name, status: 'Here', is_up: false, order: 0, makeups: 0 }]);
+    nameInput.value = '';
+    fetchPeople();
+  }
+
+  // Rotate to next lead
+  async function nextLead() {
+    const { data: rows } = await supabase.from('people').select('*').order('order', { ascending:true });
+    if (!rows.length) return;
+    // Clear all
+    await supabase.from('people').update({ is_up: false }).neq('id', '');
+    // Pick next
+    const first = rows[0];
+    await supabase.from('people').update({ is_up: true }).eq('id', first.id);
+    fetchPeople();
+  }
+
+  // Reset
+  async function resetList() {
+    await supabase.from('people').update({ is_up: false, order: 0, makeups: 0 });
+    fetchPeople();
+  }
+
+  // Wire buttons
+  document.getElementById('addBtn').onclick = addPerson;
+  document.getElementById('nextBtn').onclick = nextLead;
+  document.getElementById('resetBtn').onclick = resetList;
+
+  // Initial load
+  fetchPeople();
+</script>
+</body>
+</html>
