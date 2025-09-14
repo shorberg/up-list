@@ -13,8 +13,8 @@
     table { width: 100%; border-collapse: collapse; background: #fff; }
     th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
     thead { background: #0f172a; color: #fff; }
-    .up { font-weight: bold; }
     .x { font-weight: bold; color: black; }
+    .rx { font-weight: bold; color: red; margin-left: 4px; }
   </style>
 </head>
 <body>
@@ -34,6 +34,7 @@
         <th>Up</th>
         <th>Leads</th>
         <th>Last Lead</th>
+        <th>Actions</th>
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
@@ -57,14 +58,27 @@
     return data || [];
   }
 
+  function fmtTime(ts) {
+    if (!ts) return "";
+    return new Date(ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }
+
   function renderRow(p) {
     const tr = document.createElement("tr");
+    let upDisplay = "";
+    if (p.is_up) upDisplay = '<span class="x">X</span>';
+    if (p.makeup_count && p.makeup_count > 0) {
+      upDisplay += " " + "❌".repeat(p.makeup_count);
+    }
     tr.innerHTML = `
       <td>${p.order}</td>
       <td>${p.name}</td>
-      <td>${p.is_up ? '<span class="x">X</span>' : ''}</td>
+      <td>${upDisplay}</td>
       <td>${p.leads || 0}</td>
-      <td>${p.last_served ? new Date(p.last_served).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ''}</td>
+      <td>${fmtTime(p.last_served)}</td>
+      <td>
+        <button onclick="needMakeup(${p.id}, ${p.leads || 0})">Need Makeup</button>
+      </td>
     `;
     return tr;
   }
@@ -81,11 +95,10 @@
 
     const people = await fetchPeople();
     const nextOrder = people.length ? Math.max(...people.map(p => p.order)) + 1 : 1;
-
     const fixed = name.toLowerCase().replace(/\b\w/g, m => m.toUpperCase());
 
     await supabase.from("people").insert([
-      { name: fixed, order: nextOrder, is_up: people.length === 0, leads: 0 }
+      { name: fixed, order: nextOrder, is_up: people.length === 0, leads: 0, makeup_count: 0 }
     ]);
 
     nameInput.value = "";
@@ -96,28 +109,55 @@
     const people = await fetchPeople();
     if (people.length === 0) return;
 
-    // find current "up"
+    // Anyone with makeup?
+    const makeup = people.find(p => p.makeup_count && p.makeup_count > 0);
+    if (makeup) {
+      await supabase.from("people").update({
+        leads: (makeup.leads || 0) + 1,
+        last_served: new Date().toISOString(),
+        makeup_count: makeup.makeup_count - 1
+      }).eq("id", makeup.id);
+      return refreshTable();
+    }
+
+    // Find current "up"
     const current = people.find(p => p.is_up);
     if (!current) {
-      // no one marked as up, set first person
       await supabase.from("people").update({ is_up: true }).eq("id", people[0].id);
       return refreshTable();
     }
 
-    // give current person a lead
+    // Give current person a lead
     await supabase.from("people").update({
       leads: (current.leads || 0) + 1,
       last_served: new Date().toISOString(),
       is_up: false
     }).eq("id", current.id);
 
-    // find next in order
+    // Rotate to next
     let idx = people.findIndex(p => p.id === current.id);
     let nextIdx = (idx + 1) % people.length;
     let next = people[nextIdx];
 
-    // mark next person as up
     await supabase.from("people").update({ is_up: true }).eq("id", next.id);
+
+    refreshTable();
+  }
+
+  async function needMakeup(id, leads) {
+    // reduce lead count and add a makeup
+    await supabase.from("people").update({
+      leads: Math.max(0, leads - 1),
+      makeup_count: supabase.rpc('increment_makeup', { row_id: id })
+    }).eq("id", id);
+
+    // fallback if RPC not available → just increment makeup_count manually
+    const { data } = await supabase.from("people").select("makeup_count").eq("id", id).single();
+    if (data) {
+      await supabase.from("people").update({
+        makeup_count: (data.makeup_count || 0) + 1
+      }).eq("id", id);
+    }
 
     refreshTable();
   }
@@ -126,7 +166,7 @@
   document.getElementById("nextBtn").addEventListener("click", nextLead);
 
   refreshTable();
-  setInterval(refreshTable, 5000); // refresh every 5s
+  setInterval(refreshTable, 5000);
 </script>
 </body>
 </html>
