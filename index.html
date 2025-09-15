@@ -18,15 +18,18 @@
     textarea{height:32px;resize:none}
     button{height:36px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer}
     button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-    table{width:100%;border-collapse:collapse;background:#fff}
+    table{width:100%;border-collapse:collapse;background:#fff;display:block;overflow-x:auto;white-space:nowrap}
     th,td{border:1px solid var(--line);padding:8px;vertical-align:middle}
-    thead th{background:var(--thead);color:#fff;text-align:left}
+    thead th{background:var(--thead);color:#fff;text-align:left;position:sticky;top:0;z-index:1}
     td.center{text-align:center}
     .blackX{color:#000;font-weight:800}
     .redX{color:#e03131;font-weight:900}
     .muted{color:var(--muted)}
     .card{margin-top:18px;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
     .card thead th{background:#2f2f2f}
+    input.nameEdit{width:100%;height:28px;font-size:14px}
+    tr[data-up="true"]{background:#eafbea}
+    td.leads{font-weight:bold}
   </style>
 </head>
 <body>
@@ -52,7 +55,7 @@
         <th style="width:120px">Last Lead</th>
         <th style="width:120px">Makeups</th>
         <th style="width:280px">Actions</th>
-        <th>Schedule Today</th> <!-- last column on the right -->
+        <th>Schedule Today</th>
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
@@ -62,7 +65,7 @@
     <table>
       <thead>
         <tr>
-          <th>Leaderboard</th>
+          <th>Leaderboard (Today)</th>
           <th>Appointments Set</th>
         </tr>
       </thead>
@@ -119,6 +122,10 @@
     return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   }
   function titleCase(s){ return s.toLowerCase().replace(/\b\w/g, m => m.toUpperCase()); }
+  function isSameLocalDay(a,b){
+    const da=new Date(a), db=new Date(b);
+    return da.getFullYear()===db.getFullYear() && da.getMonth()===db.getMonth() && da.getDate()===db.getDate();
+  }
 
   // Actions
   async function addPerson(){
@@ -137,13 +144,18 @@
     refresh();
   }
 
+  async function onNameChange(id,val){
+    const fixed = titleCase(val.trim());
+    await supabase.from("people").update({name:fixed}).eq("id",id);
+    refresh();
+  }
+
   async function onNeedMakeup(id){
     const { data: p, error: e1 } = await supabase.from("people").select("leads").eq("id",id).single();
     if (!e1 && p) {
       await supabase.from("people").update({leads: Math.max(0,(p.leads||0)-1)}).eq("id",id);
     }
-    const ins = await supabase.from("makeups").insert([{person_id:id}]);
-    if (ins.error) console.error("makeup insert:", ins.error);
+    await supabase.from("makeups").insert([{person_id:id}]);
     refresh();
   }
 
@@ -171,8 +183,7 @@
   }
 
   async function onSetAppt(id){
-    const { error } = await supabase.from("appointments").insert([{person_id:id}]);
-    if (error) console.error("set appt:", error);
+    await supabase.from("appointments").insert([{person_id:id}]);
     refresh();
   }
 
@@ -180,7 +191,6 @@
     const [people,makeups] = await Promise.all([fetchPeople(),fetchMakeups()]);
     if(!people.length) return;
 
-    // 1) Serve makeups first (FIFO)
     if(makeups.length>0){
       const mu = makeups[0];
       const person = people.find(p=>p.id===mu.person_id);
@@ -193,7 +203,6 @@
       return refresh();
     }
 
-    // 2) Normal rotation among "Here" only
     const here = people.filter(p => p.status !== "Gone");
     if (here.length === 0) return;
 
@@ -220,38 +229,20 @@
     refresh();
   }
 
-  // Reset: zero leads, clear last_served & schedules, clear makeups + appts,
-  // then put black X on the first "Here" person (by order)
   async function resetAll(){
-    // zero/clear for everyone
-    const u = await supabase.from("people")
-      .update({leads:0,last_served:null,is_up:false,schedule:""})
-      .not("id","is",null);
-    if (u.error) console.error("reset people error:", u.error);
-
-    // clear queues & appts
-    const d1 = await supabase.from("makeups").delete().not("id","is",null);
-    if (d1.error) console.error("reset makeups error:", d1.error);
-    const d2 = await supabase.from("appointments").delete().not("id","is",null);
-    if (d2.error) console.error("reset appts error:", d2.error);
-
-    // set X to first "Here" person
+    await supabase.from("people").update({leads:0,last_served:null,is_up:false,schedule:""});
+    await supabase.from("makeups").delete().not("id","is",null);
+    await supabase.from("appointments").delete().not("id","is",null);
     const people = await fetchPeople();
     const firstHere = (people||[]).find(p => p.status !== "Gone");
-    if (firstHere) {
-      await supabase.from("people").update({is_up:true}).eq("id", firstHere.id);
-    }
+    if (firstHere) await supabase.from("people").update({is_up:true}).eq("id", firstHere.id);
     refresh();
   }
 
-  // New Day: blow out ALL users and related data, start fresh
   async function newDay(){
-    const d3 = await supabase.from("makeups").delete().not("id","is",null);
-    if (d3.error) console.error("new day makeups error:", d3.error);
-    const d4 = await supabase.from("appointments").delete().not("id","is",null);
-    if (d4.error) console.error("new day appts error:", d4.error);
-    const d5 = await supabase.from("people").delete().not("id","is",null);
-    if (d5.error) console.error("new day people error:", d5.error);
+    await supabase.from("makeups").delete().not("id","is",null);
+    await supabase.from("appointments").delete().not("id","is",null);
+    await supabase.from("people").delete().not("id","is",null);
     refresh();
   }
 
@@ -262,10 +253,11 @@
       const tr=document.createElement("tr");
       const muCount=muMap.get(p.id)||0;
       const up=p.is_up?'<span class="blackX">X</span>':"";
-      const reds=muCount>0?'<span class="redX">'+"X".repeat(muCount)+'</span>':"";
+      const reds=muCount>0?'<span class="redX'>"+"X".repeat(muCount)+"</span>":"";
+      tr.dataset.up = p.is_up;
       tr.innerHTML=`
         <td>${p.order ?? ""}</td>
-        <td>${p.name ?? ""}</td>
+        <td><input class="nameEdit" value="${p.name ?? ""}" onchange="onNameChange('${p.id}',this.value)" /></td>
         <td>
           <select onchange="onStatusChange('${p.id}',this.value)">
             <option ${p.status==="Here"?"selected":""}>Here</option>
@@ -273,7 +265,7 @@
           </select>
         </td>
         <td class="center">${up}</td>
-        <td>${p.leads ?? 0}</td>
+        <td class="leads">${p.leads ?? 0}</td>
         <td>${fmtTime(p.last_served)}</td>
         <td class="center">${reds}</td>
         <td>
@@ -288,36 +280,22 @@
     });
   }
 
-  function isSameLocalDay(a,b){
-    const da=new Date(a), db=new Date(b);
-    return da.getFullYear()===db.getFullYear() && da.getMonth()===db.getMonth() && da.getDate()===db.getDate();
-  }
-
   async function renderLeaderboard(){
     const [appts, ppl] = await Promise.all([fetchAppointments(), supabase.from("people").select("id,name")]);
     const people = (ppl.data || []);
     const counts = {};
-    people.forEach(p => counts[p.id] = { name: p.name, count: 0, last: null });
-
+    people.forEach(p => counts[p.id] = { name: p.name, count: 0 });
     const today = new Date();
     let todayTotal = 0;
-
     (appts||[]).forEach(a=>{
+      if (!isSameLocalDay(a.created_at, today)) return;
       const entry = counts[a.person_id];
       if (!entry) return;
       entry.count++;
-      if (!entry.last || new Date(a.created_at) > new Date(entry.last)) entry.last = a.created_at;
-      if (isSameLocalDay(a.created_at, today)) todayTotal++;
+      todayTotal++;
     });
-
     const rows = Object.values(counts);
-    rows.sort((a,b)=>{
-      if (b.count !== a.count) return b.count - a.count;
-      const al = a.last ? new Date(a.last).getTime() : 0;
-      const bl = b.last ? new Date(b.last).getTime() : 0;
-      return bl - al;
-    });
-
+    rows.sort((a,b)=> b.count - a.count);
     leaderEl.innerHTML="";
     rows.forEach(r=>{
       const tr=document.createElement("tr");
@@ -344,6 +322,3 @@
   // Init
   refresh();
   setInterval(refresh, 5000);
-</script>
-</body>
-</html>
