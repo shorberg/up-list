@@ -31,6 +31,7 @@
     .removeBtn{color:#e03131;font-weight:bold;cursor:pointer;border:none;background:none;font-size:16px;}
     .dragHandle{cursor:grab;font-size:18px;text-align:center;}
     tr.dragging{opacity:0.5}
+    input.apptEdit{width:60px;text-align:center}
   </style>
 </head>
 <body>
@@ -55,7 +56,6 @@
         <th style="width:70px">Leads</th>
         <th style="width:110px">Last Lead</th>
         <th style="width:100px">Makeups</th>
-        <th style="width:80px">Appts</th>
         <th style="width:180px">Actions</th>
         <th style="width:200px">Schedule Today</th>
         <th style="width:40px">Remove</th>
@@ -120,7 +120,10 @@
     const people=await fetchPeople();
     const nextOrder=people.length?Math.max(...people.map(p=>p.order||0))+1:1;
     const anyUp=people.some(p=>p.is_up);
-    const {error}=await supabase.from("people").insert([{name:fixed,status:"Here",is_up:!anyUp && people.length===0,order:nextOrder,leads:0,last_served:null,schedule:"",appointments_count:0}]);
+    const {error}=await supabase.from("people").insert([{
+      name:fixed,status:"Here",is_up:!anyUp && people.length===0,order:nextOrder,
+      leads:0,last_served:null,schedule:"",appointments_count:0,updated_at:new Date().toISOString()
+    }]);
     if(error) console.error("addPerson",error);
     nameInput.value="";
     refresh();
@@ -132,17 +135,11 @@
   async function onSetAppt(id){ 
     const {data:p}=await supabase.from("people").select("appointments_count").eq("id",id).single();
     const newCount=(p?.appointments_count||0)+1;
-    await supabase.from("people").update({appointments_count:newCount}).eq("id",id);
+    await supabase.from("people").update({appointments_count:newCount,updated_at:new Date().toISOString()}).eq("id",id);
     refresh();
   }
-  async function onApptChange(id,val){
-    const count=parseInt(val,10)||0;
-    await supabase.from("people").update({appointments_count:count}).eq("id",id);
-    refresh();
-  }
-  async function onMoveXHere(id){ await supabase.from("people").update({is_up:false}).not("id","is",null); await supabase.from("people").update({is_up:true}).eq("id",id); refresh(); }
-  async function onRemove(id){ await supabase.from("makeups").delete().eq("person_id",id); await supabase.from("people").delete().eq("id",id); refresh(); }
   async function onScheduleChange(id,val){ await supabase.from("people").update({schedule:val}).eq("id",id); }
+  async function onRemove(id){ await supabase.from("makeups").delete().eq("person_id",id); await supabase.from("people").delete().eq("id",id); refresh(); }
 
   async function nextLead(){ 
     const [people,makeups]=await Promise.all([fetchPeople(),fetchMakeups()]); 
@@ -167,7 +164,9 @@
   }
 
   async function resetAll(){
-    await supabase.from("people").update({leads:0,last_served:null,is_up:false,schedule:"",appointments_count:0,status:"Here"});
+    await supabase.from("people").update({
+      leads:0,last_served:null,is_up:false,schedule:"",appointments_count:0,status:"Here",updated_at:new Date().toISOString()
+    });
     await supabase.from("makeups").delete().not("id","is",null);
     const people=await fetchPeople();
     const firstHere=(people||[]).find(p=>p.status!=="Gone");
@@ -175,7 +174,11 @@
     refresh();
   }
 
-  async function newDay(){ await supabase.from("makeups").delete().not("id","is",null); await supabase.from("people").delete().not("id","is",null); refresh(); }
+  async function newDay(){ 
+    await supabase.from("makeups").delete().not("id","is",null); 
+    await supabase.from("people").delete().not("id","is",null); 
+    refresh(); 
+  }
 
   // Drag & Drop
   function enableDrag(tr,id){ tr.draggable=true; tr.addEventListener("dragstart",e=>{ tr.classList.add("dragging"); }); tr.addEventListener("dragend",e=>{ tr.classList.remove("dragging"); }); tr.addEventListener("dragover",e=>{ e.preventDefault(); const dragging=document.querySelector("tr.dragging"); if(dragging&&tr!==dragging){ const rect=tr.getBoundingClientRect(); const next=(e.clientY-rect.top)>rect.height/2; tbody.insertBefore(dragging,next?tr.nextSibling:tr); } }); tr.addEventListener("drop",async e=>{ e.preventDefault(); const rows=Array.from(tbody.children); for(let i=0;i<rows.length;i++){ const rowId=rows[i].dataset.id; await supabase.from("people").update({order:i+1}).eq("id",rowId);} refresh(); }); }
@@ -197,7 +200,6 @@
         <td>${p.leads ?? 0}</td>
         <td>${fmtTime(p.last_served)}</td>
         <td class="center">${reds}</td>
-        <td><input type="number" value="${p.appointments_count ?? 0}" onchange="onApptChange('${p.id}',this.value)" style="width:50px"/></td>
         <td><button onclick="onNeedMakeup('${p.id}')">Makeup</button><button onclick="onSetAppt('${p.id}')">Appt</button><button onclick="onMoveXHere('${p.id}')">X</button></td>
         <td><textarea onchange="onScheduleChange('${p.id}',this.value)">${p.schedule||""}</textarea></td>
         <td class="center"><button class="removeBtn" onclick="onRemove('${p.id}')">×</button></td>`; 
@@ -206,14 +208,30 @@
   }
 
   async function renderLeaderboard(){ 
-    const { data: people, error } = await supabase.from("people").select("id,name,appointments_count"); 
+    const { data: people, error } = await supabase.from("people").select("id,name,appointments_count,updated_at"); 
     if (error) { console.error(error); return; }
     let todayTotal=0; 
-    const rows=(people||[]).map(p=>{ todayTotal+=p.appointments_count||0; return {name:p.name,count:p.appointments_count||0}; }); 
-    rows.sort((a,b)=>b.count-a.count); 
+    const rows=(people||[]).map(p=>{ todayTotal+=p.appointments_count||0; return {id:p.id,name:p.name,count:p.appointments_count||0,last:p.updated_at}; }); 
+    rows.sort((a,b)=>{ 
+      if(b.count!==a.count) return b.count-a.count; 
+      const al=a.last?new Date(a.last).getTime():0; 
+      const bl=b.last?new Date(b.last).getTime():0; 
+      return bl-al; 
+    }); 
     leaderEl.innerHTML=""; 
-    rows.forEach(r=>{ const tr=document.createElement("tr"); tr.innerHTML=`<td>${r.name}</td><td>${r.count}</td>`; leaderEl.appendChild(tr); }); 
+    rows.forEach(r=>{ 
+      const tr=document.createElement("tr"); 
+      tr.innerHTML=`<td>${r.name}</td>
+        <td><input class="apptEdit" type="number" value="${r.count}" onchange="onApptChange('${r.id}', this.value)" /></td>`; 
+      leaderEl.appendChild(tr); 
+    }); 
     apptTotalEl.textContent=todayTotal; 
+  }
+
+  async function onApptChange(id,val){
+    const count=parseInt(val,10)||0;
+    await supabase.from("people").update({appointments_count:count,updated_at:new Date().toISOString()}).eq("id",id);
+    refresh();
   }
 
   async function refresh(){ 
