@@ -6,30 +6,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <style>
-    body { font-family: Arial, sans-serif; background:#f6f8fb; margin:0; padding:20px; }
-    h1 { margin:0 0 8px; }
-    .bar { margin:12px 0; display:flex; gap:8px; flex-wrap:wrap; }
-    input, select, textarea { padding:6px; border:1px solid #ccc; border-radius:6px; }
-    textarea { resize:none; height:28px; }
-    button { padding:6px 10px; border:1px solid #ccc; border-radius:6px; background:#fff; cursor:pointer; }
-    button.primary { background:#2f67ff; color:#fff; border-color:#2f67ff; }
-    table { width:100%; border-collapse:collapse; background:#fff; margin-top:12px; }
-    th, td { border:1px solid #ddd; padding:6px; text-align:left; vertical-align:middle; }
-    thead th { background:#0f172a; color:#fff; }
-    td.center { text-align:center; }
-    .blackX { color:black; font-weight:bold; }
-    .redX { color:red; font-weight:bold; }
-    .muted { color:#5b6b7a; }
-    .card { margin-top:20px; background:#fff; border:1px solid #ccc; border-radius:8px; overflow:hidden; }
-    .card th { background:#2f2f2f; }
+    :root{
+      --bg:#f6f8fb; --ink:#0f1a2a; --muted:#5b6b7a; --line:#e6eaf0; --accent:#2f67ff;
+      --good:#1f9d55; --bad:#d64545; --thead:#0f172a;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;padding:20px}
+    h1{margin:0 0 8px 0}
+    .bar{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+    input,select,textarea{height:36px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+    textarea{height:32px;resize:none}
+    button{height:36px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer}
+    button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+    table{width:100%;border-collapse:collapse;background:#fff}
+    th,td{border:1px solid var(--line);padding:8px;vertical-align:middle}
+    thead th{background:var(--thead);color:#fff;text-align:left}
+    td.center{text-align:center}
+    .blackX{color:#000;font-weight:800}
+    .redX{color:#e03131;font-weight:900}
+    .muted{color:var(--muted)}
+    .card{margin-top:18px;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+    .card thead th{background:#2f2f2f}
   </style>
 </head>
 <body>
   <h1>Reliable Superstore BDC Online Up List</h1>
-  <div class="muted">
-    <span id="today"></span> • <span id="clock"></span> • 
-    Total Appointments Today: <b id="apptTotal">0</b>
-  </div>
+  <div class="muted"><span id="today"></span> • <span id="clock"></span> • Total Appointments Today: <b id="apptTotal">0</b></div>
 
   <div class="bar">
     <input id="nameInput" type="text" placeholder="Add team member name" />
@@ -41,15 +43,15 @@
   <table>
     <thead>
       <tr>
-        <th>Order</th>
-        <th>Name</th>
-        <th>Status</th>
-        <th>Up</th>
-        <th>Leads</th>
-        <th>Last Lead</th>
-        <th>Makeups</th>
-        <th>Actions</th>
-        <th>Schedule Today</th>
+        <th style="width:70px">Order</th>
+        <th style="width:220px">Name</th>
+        <th style="width:110px">Status</th>
+        <th style="width:70px">Up</th>
+        <th style="width:90px">Leads</th>
+        <th style="width:120px">Last Lead</th>
+        <th style="width:120px">Makeups</th>
+        <th style="width:280px">Actions</th>
+        <th>Schedule Today</th> <!-- last column on the right -->
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
@@ -76,6 +78,7 @@
   const tbody = document.getElementById("tbody");
   const leaderEl = document.getElementById("leaderboard");
   const apptTotalEl = document.getElementById("apptTotal");
+  const nameInput = document.getElementById("nameInput");
 
   // Clock
   function tick(){
@@ -90,11 +93,17 @@
   // Helpers
   async function fetchPeople() {
     const { data, error } = await supabase.from("people").select("*").order("order",{ascending:true});
-    if (error) { console.error(error); return []; }
+    if (error) { console.error("fetchPeople:", error); return []; }
     return data || [];
   }
   async function fetchMakeups() {
-    const { data } = await supabase.from("makeups").select("*").order("created_at",{ascending:true});
+    const { data, error } = await supabase.from("makeups").select("*").order("created_at",{ascending:true});
+    if (error) { console.error("fetchMakeups:", error); return []; }
+    return data || [];
+  }
+  async function fetchAppointments() {
+    const { data, error } = await supabase.from("appointments").select("person_id, created_at");
+    if (error) { console.error("fetchAppointments:", error); return []; }
     return data || [];
   }
   function buildMakeupCountMap(makeups) {
@@ -104,74 +113,115 @@
   }
   function fmtTime(ts) {
     if(!ts) return "";
-    return new Date(ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return ts;
+    return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   }
+  function titleCase(s){ return s.toLowerCase().replace(/\b\w/g, m => m.toUpperCase()); }
 
   // Actions
   async function addPerson(){
-    const raw = document.getElementById("nameInput").value.trim();
+    const raw = nameInput.value.trim();
     if(!raw) return;
-    const fixed = raw.toLowerCase().replace(/\b\w/g, m=>m.toUpperCase());
+    const fixed = titleCase(raw);
     const people = await fetchPeople();
     const nextOrder = people.length? Math.max(...people.map(p=>p.order||0))+1:1;
-    await supabase.from("people").insert([{
-      name:fixed,status:"Here",is_up:people.length===0,order:nextOrder,
+
+    const anyUp = people.some(p => p.is_up === true);
+    const { error } = await supabase.from("people").insert([{
+      name:fixed,status:"Here",is_up: !anyUp && people.length===0,order:nextOrder,
       leads:0,last_served:null,schedule:""
     }]);
-    document.getElementById("nameInput").value="";
+    if (error) console.error("addPerson:", error);
+    nameInput.value="";
     refresh();
   }
+
   async function onNeedMakeup(id){
-    const { data: person } = await supabase.from("people").select("leads").eq("id",id).single();
-    await supabase.from("people").update({leads:Math.max(0,(person.leads||0)-1)}).eq("id",id);
-    await supabase.from("makeups").insert([{person_id:id}]);
+    // Decrement leads (min 0) then add a FIFO makeup row
+    const { data: p, error: e1 } = await supabase.from("people").select("leads").eq("id",id).single();
+    if (!e1 && p) {
+      await supabase.from("people").update({leads: Math.max(0,(p.leads||0)-1)}).eq("id",id);
+    }
+    const ins = await supabase.from("makeups").insert([{person_id:id}]);
+    if (ins.error) console.error("makeup insert:", ins.error);
     refresh();
   }
+
   async function onMoveXHere(id){
-    await supabase.from("people").update({is_up:false}).neq("id",id);
+    await supabase.from("people").update({is_up:false}).not("id","is",null);
     await supabase.from("people").update({is_up:true}).eq("id",id);
     refresh();
   }
+
   async function onRemove(id){
     await supabase.from("makeups").delete().eq("person_id",id);
     await supabase.from("people").delete().eq("id",id);
     refresh();
   }
+
   async function onStatusChange(id,val){
+    // If person becoming Gone and was up, clear X
+    const { data: p } = await supabase.from("people").select("is_up").eq("id",id).single();
+    if (p?.is_up && val === "Gone") await supabase.from("people").update({is_up:false}).eq("id",id);
     await supabase.from("people").update({status:val}).eq("id",id);
     refresh();
   }
+
   async function onScheduleChange(id,val){
     await supabase.from("people").update({schedule:val}).eq("id",id);
   }
+
   async function onSetAppt(id){
-    await supabase.from("appointments").insert([{person_id:id}]);
+    const { error } = await supabase.from("appointments").insert([{person_id:id}]);
+    if (error) console.error("set appt:", error);
     refresh();
   }
 
   async function nextLead(){
     const [people,makeups] = await Promise.all([fetchPeople(),fetchMakeups()]);
     if(!people.length) return;
+
+    // 1) Serve makeups first (FIFO)
     if(makeups.length>0){
       const mu = makeups[0];
       const person = people.find(p=>p.id===mu.person_id);
-      await supabase.from("people").update({
-        leads:(person.leads||0)+1,last_served:new Date().toISOString()
-      }).eq("id",mu.person_id);
+      if (person){
+        await supabase.from("people").update({
+          leads:(person.leads||0)+1,last_served:new Date().toISOString()
+        }).eq("id",mu.person_id);
+      }
       await supabase.from("makeups").delete().eq("id",mu.id);
       return refresh();
     }
-    const current = people.find(p=>p.is_up);
-    if(!current){
-      await supabase.from("people").update({is_up:true}).eq("id",people[0].id);
+
+    // 2) Normal rotation among "Here" only
+    const here = people.filter(p => p.status !== "Gone");
+    if (here.length === 0) return; // everyone Gone → nothing to do
+
+    let current = people.find(p=>p.is_up);
+    if(!current || current.status === "Gone"){
+      // set X to first Here and stop (next press gives them the lead)
+      await supabase.from("people").update({is_up:false}).not("id","is",null);
+      await supabase.from("people").update({is_up:true}).eq("id",here[0].id);
       return refresh();
     }
+
+    // Give current their lead
     await supabase.from("people").update({
       leads:(current.leads||0)+1,last_served:new Date().toISOString(),is_up:false
     }).eq("id",current.id);
-    const idx = people.findIndex(p=>p.id===current.id);
-    const nextIdx=(idx+1)%people.length;
-    await supabase.from("people").update({is_up:true}).eq("id",people[nextIdx].id);
+
+    // Move X to next Here (by global order with wrap)
+    const curIdx = people.findIndex(p=>p.id===current.id);
+    const n = people.length;
+    let nextId = null;
+    for (let step=1; step<=n; step++){
+      const idx = (curIdx + step) % n;
+      if (people[idx].status !== "Gone"){ nextId = people[idx].id; break; }
+    }
+    if (nextId) await supabase.from("people").update({is_up:true}).eq("id", nextId);
+
     refresh();
   }
 
@@ -185,14 +235,14 @@
   // Render
   function renderTable(people,muMap){
     tbody.innerHTML="";
-    people.forEach(p=>{
+    (people||[]).forEach(p=>{
       const tr=document.createElement("tr");
       const muCount=muMap.get(p.id)||0;
       const up=p.is_up?'<span class="blackX">X</span>':"";
       const reds=muCount>0?'<span class="redX">'+"X".repeat(muCount)+'</span>':"";
       tr.innerHTML=`
-        <td>${p.order}</td>
-        <td>${p.name}</td>
+        <td>${p.order ?? ""}</td>
+        <td>${p.name ?? ""}</td>
         <td>
           <select onchange="onStatusChange('${p.id}',this.value)">
             <option ${p.status==="Here"?"selected":""}>Here</option>
@@ -200,7 +250,7 @@
           </select>
         </td>
         <td class="center">${up}</td>
-        <td>${p.leads||0}</td>
+        <td>${p.leads ?? 0}</td>
         <td>${fmtTime(p.last_served)}</td>
         <td class="center">${reds}</td>
         <td>
@@ -215,46 +265,64 @@
     });
   }
 
+  function isSameLocalDay(a,b){
+    const da=new Date(a), db=new Date(b);
+    return da.getFullYear()===db.getFullYear() && da.getMonth()===db.getMonth() && da.getDate()===db.getDate();
+  }
+
   async function renderLeaderboard(){
-    const { data: appts, error } = await supabase.from("appointments").select("person_id, created_at");
-    if(error){ console.error(error); return; }
-    const { data: people } = await supabase.from("people").select("id,name");
-    let counts={};
-    people.forEach(p=>{
-      counts[p.id]={count:0,last:null,name:p.name};
+    const [appts, ppl] = await Promise.all([fetchAppointments(), supabase.from("people").select("id,name")]);
+    const people = ppl.data || [];
+
+    // Build totals including people with 0
+    const counts = {};
+    people.forEach(p => counts[p.id] = { name: p.name, count: 0, last: null });
+
+    // Only count appointments from "today" for the top stat; leaderboard shows all since last reset (appointments table is wiped by Reset)
+    const today = new Date();
+    let todayTotal = 0;
+
+    (appts||[]).forEach(a=>{
+      const entry = counts[a.person_id];
+      if (!entry) return;
+      entry.count++;
+      if (!entry.last || new Date(a.created_at) > new Date(entry.last)) entry.last = a.created_at;
+      if (isSameLocalDay(a.created_at, today)) todayTotal++;
     });
-    appts.forEach(a=>{
-      counts[a.person_id].count++;
-      if(!counts[a.person_id].last || new Date(a.created_at)>new Date(counts[a.person_id].last)){
-        counts[a.person_id].last=a.created_at;
-      }
+
+    const rows = Object.values(counts);
+    rows.sort((a,b)=>{
+      if (b.count !== a.count) return b.count - a.count;
+      const al = a.last ? new Date(a.last).getTime() : 0;
+      const bl = b.last ? new Date(b.last).getTime() : 0;
+      return bl - al; // most recent first when tied
     });
-    let rows=Object.values(counts);
-    rows.sort((a,b)=> b.count===a.count ? (new Date(b.last||0)-new Date(a.last||0)) : b.count-a.count );
+
     leaderEl.innerHTML="";
     rows.forEach(r=>{
       const tr=document.createElement("tr");
-      tr.innerHTML=`<td>${r.name}</td><td>${r.count}</td>`;
+      tr.innerHTML = `<td>${r.name}</td><td>${r.count}</td>`;
       leaderEl.appendChild(tr);
     });
-    apptTotalEl.textContent=appts.length;
+    apptTotalEl.textContent = todayTotal;
   }
 
   async function refresh(){
-    const [people,makeups]=await Promise.all([fetchPeople(),fetchMakeups()]);
-    const muMap=buildMakeupCountMap(makeups);
-    renderTable(people,muMap);
+    const [people,makeups] = await Promise.all([fetchPeople(),fetchMakeups()]);
+    const muMap = buildMakeupCountMap(makeups);
+    renderTable(people, muMap);
     renderLeaderboard();
   }
 
   // Wire
-  document.getElementById("addBtn").onclick=addPerson;
-  document.getElementById("nextBtn").onclick=nextLead;
-  document.getElementById("resetBtn").onclick=resetAll;
-  document.getElementById("nameInput").addEventListener("keydown",e=>{if(e.key==="Enter")addPerson();});
+  document.getElementById("addBtn").onclick = addPerson;
+  document.getElementById("nextBtn").onclick = nextLead;
+  document.getElementById("resetBtn").onclick = resetAll;
+  nameInput.addEventListener("keydown", e => { if (e.key === "Enter") addPerson(); });
 
+  // Init
   refresh();
-  setInterval(refresh,5000);
+  setInterval(refresh, 5000);
 </script>
 </body>
 </html>
