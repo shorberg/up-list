@@ -140,6 +140,13 @@
   async function onScheduleChange(id,val){ await supabase.from("people").update({schedule:val}).eq("id",id); }
   async function onRemove(id){ await supabase.from("makeups").delete().eq("person_id",id); await supabase.from("people").delete().eq("id",id); refresh(); }
 
+  // ✅ Fixed function
+  async function onMoveXHere(id){
+    await supabase.from("people").update({is_up:false}).not("id","is",null);
+    await supabase.from("people").update({is_up:true}).eq("id",id);
+    refresh();
+  }
+
   async function nextLead(){ 
     const [people,makeups]=await Promise.all([fetchPeople(),fetchMakeups()]); 
     if(!people.length) return; 
@@ -163,7 +170,6 @@
   }
 
   async function resetAll(){
-    // Reset all rows
     await supabase.from("people").update({
       leads:0,
       last_served:null,
@@ -173,17 +179,12 @@
       status:"Here",
       updated_at:new Date().toISOString()
     }).not("id","is",null);
-
-    // Clear makeups
     await supabase.from("makeups").delete().not("id","is",null);
-
-    // Reassign first available person as up
     const people=await fetchPeople();
     const firstHere=(people||[]).find(p=>p.status!=="Gone");
     if(firstHere) {
       await supabase.from("people").update({is_up:true}).eq("id",firstHere.id);
     }
-
     refresh();
   }
 
