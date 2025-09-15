@@ -76,9 +76,10 @@
   </div>
 
 <script>
-const SUPABASE_URL = "https://imfzlhudhljathvkgkqf.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...."; 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  // === CONFIG ===
+  const SUPABASE_URL = "https://imfzlhudhljathvkgkqf.supabase.co";
+  const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImltZnpsaHVkaGxqYXRodmtna3FmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc4MDAxMDUsImV4cCI6MjA3MzM3NjEwNX0.Bb-SUJMWfzVMHkdYuAgAD31wExcLuNazss6AJ11Z_VQ";
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
   const tbody=document.getElementById("tbody");
   const leaderEl=document.getElementById("leaderboard");
@@ -127,34 +128,17 @@ const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
   async function onScheduleChange(id,val){ await supabase.from("people").update({schedule:val}).eq("id",id); }
 
   async function nextLead(){ const [people,makeups]=await Promise.all([fetchPeople(),fetchMakeups()]); if(!people.length) return; if(makeups.length>0){ const mu=makeups[0]; const person=people.find(p=>p.id===mu.person_id); if(person){ await supabase.from("people").update({leads:(person.leads||0)+1,last_served:new Date().toISOString()}).eq("id",mu.person_id);} await supabase.from("makeups").delete().eq("id",mu.id); return refresh(); } const here=people.filter(p=>p.status!=="Gone"); if(here.length===0) return; let current=people.find(p=>p.is_up); if(!current||current.status==="Gone"){ await supabase.from("people").update({is_up:false}).not("id","is",null); await supabase.from("people").update({is_up:true}).eq("id",here[0].id); return refresh(); } await supabase.from("people").update({leads:(current.leads||0)+1,last_served:new Date().toISOString(),is_up:false}).eq("id",current.id); const curIdx=people.findIndex(p=>p.id===current.id); const n=people.length; let nextId=null; for(let step=1;step<=n;step++){ const idx=(curIdx+step)%n; if(people[idx].status!=="Gone"){ nextId=people[idx].id; break; }} if(nextId) await supabase.from("people").update({is_up:true}).eq("id",nextId); refresh(); }
-
   async function resetAll(){
-    const { data: people } = await supabase.from("people").select("id");
-    if (people) {
-      for (const p of people) {
-        await supabase.from("people").update({
-          leads: 0,
-          last_served: null,
-          is_up: false,
-          schedule: "",
-          status: "Here"
-        }).eq("id", p.id);
-      }
-    }
+    // Reset stats for all people
+    await supabase.from("people").update({leads:0,last_served:null,is_up:false,schedule:"",status:"Here"});
     await supabase.from("makeups").delete().not("id","is",null);
     await supabase.from("appointments").delete().not("id","is",null);
-    const updated = await fetchPeople();
-    const firstHere = (updated||[]).find(p => p.status !== "Gone");
-    if (firstHere) await supabase.from("people").update({is_up:true}).eq("id", firstHere.id);
+    const people=await fetchPeople();
+    const firstHere=(people||[]).find(p=>p.status!=="Gone");
+    if(firstHere) await supabase.from("people").update({is_up:true}).eq("id",firstHere.id);
     refresh(true);
   }
-
-  async function newDay(){
-    await supabase.from("makeups").delete().not("id","is",null);
-    await supabase.from("appointments").delete().not("id","is",null);
-    await supabase.from("people").delete().not("id","is",null);
-    refresh(true);
-  }
+  async function newDay(){ await supabase.from("makeups").delete().not("id","is",null); await supabase.from("appointments").delete().not("id","is",null); await supabase.from("people").delete().not("id","is",null); refresh(true); }
 
   // Drag and Drop
   function enableDrag(tr,id){ tr.draggable=true; tr.addEventListener("dragstart",e=>{ tr.classList.add("dragging"); }); tr.addEventListener("dragend",e=>{ tr.classList.remove("dragging"); }); tr.addEventListener("dragover",e=>{ e.preventDefault(); const dragging=document.querySelector("tr.dragging"); if(dragging&&tr!==dragging){ const rect=tr.getBoundingClientRect(); const next=(e.clientY-rect.top)>rect.height/2; tbody.insertBefore(dragging,next?tr.nextSibling:tr); } }); tr.addEventListener("drop",async e=>{ e.preventDefault(); const rows=Array.from(tbody.children); for(let i=0;i<rows.length;i++){ const rowId=rows[i].dataset.id; await supabase.from("people").update({order:i+1}).eq("id",rowId);} refresh(); }); }
