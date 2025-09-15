@@ -28,7 +28,6 @@
     .card{margin-top:18px;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
     .card thead th{background:#2f2f2f}
     input.nameEdit{height:24px;font-size:13px;min-width:200px;width:100%;}
-    input.apptEdit{height:24px;font-size:13px;width:50px;text-align:center;}
     .removeBtn{color:#e03131;font-weight:bold;cursor:pointer;border:none;background:none;font-size:16px;}
     .dragHandle{cursor:grab;font-size:18px;text-align:center;}
     tr.dragging{opacity:0.5}
@@ -56,8 +55,8 @@
         <th style="width:70px">Leads</th>
         <th style="width:110px">Last Lead</th>
         <th style="width:100px">Makeups</th>
-        <th style="width:100px">Appts</th>
-        <th style="width:160px">Actions</th>
+        <th style="width:80px">Appts</th>
+        <th style="width:180px">Actions</th>
         <th style="width:200px">Schedule Today</th>
         <th style="width:40px">Remove</th>
       </tr>
@@ -79,7 +78,7 @@
 
 <script>
   const SUPABASE_URL = "https://imfzlhudhljathvkgkqf.supabase.co";
-  const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...."; // your real anon key
+  const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImltZnpsaHVkaGxqYXRodmtna3FmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc4MDAxMDUsImV4cCI6MjA3MzM3NjEwNX0.Bb-SUJMWfzVMHkdYuAgAD31wExcLuNazss6AJ11Z_VQ";
   const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
   const tbody=document.getElementById("tbody");
@@ -97,7 +96,7 @@
   }
   setInterval(tick,1000); tick();
 
-  // Fetch
+  // Fetchers
   async function fetchPeople(){ 
     const {data,error}=await supabase.from("people").select("*").order("order",{ascending:true}); 
     if(error){console.error(error);return [];} 
@@ -121,34 +120,28 @@
     const people=await fetchPeople();
     const nextOrder=people.length?Math.max(...people.map(p=>p.order||0))+1:1;
     const anyUp=people.some(p=>p.is_up);
-    const {error}=await supabase.from("people").insert([{
-      name:fixed,status:"Here",is_up:!anyUp && people.length===0,
-      order:nextOrder,leads:0,last_served:null,schedule:"",appointments_count:0
-    }]);
+    const {error}=await supabase.from("people").insert([{name:fixed,status:"Here",is_up:!anyUp && people.length===0,order:nextOrder,leads:0,last_served:null,schedule:"",appointments_count:0}]);
     if(error) console.error("addPerson",error);
     nameInput.value="";
-    refresh(true);
+    refresh();
   }
+
   async function onNameChange(id,val){ await supabase.from("people").update({name:val}).eq("id",id); refresh(); }
-  async function onStatusChange(id,val){ 
-    const {data:p}=await supabase.from("people").select("is_up").eq("id",id).single(); 
-    if(p?.is_up && val==="Gone") await supabase.from("people").update({is_up:false}).eq("id",id); 
-    await supabase.from("people").update({status:val}).eq("id",id); 
-    refresh(); 
-  }
-  async function onNeedMakeup(id){ 
-    const {data:p}=await supabase.from("people").select("leads").eq("id",id).single(); 
-    if(p){ await supabase.from("people").update({leads:Math.max(0,(p.leads||0)-1)}).eq("id",id);} 
-    await supabase.from("makeups").insert([{person_id:id}]); 
-    refresh(); 
+  async function onStatusChange(id,val){ await supabase.from("people").update({status:val}).eq("id",id); refresh(); }
+  async function onNeedMakeup(id){ const {data:p}=await supabase.from("people").select("leads").eq("id",id).single(); if(p){ await supabase.from("people").update({leads:Math.max(0,(p.leads||0)-1)}).eq("id",id);} await supabase.from("makeups").insert([{person_id:id}]); refresh(); }
+  async function onSetAppt(id){ 
+    const {data:p}=await supabase.from("people").select("appointments_count").eq("id",id).single();
+    const newCount=(p?.appointments_count||0)+1;
+    await supabase.from("people").update({appointments_count:newCount}).eq("id",id);
+    refresh();
   }
   async function onApptChange(id,val){
-    const count = parseInt(val, 10) || 0;
-    await supabase.from("people").update({appointments_count: count}).eq("id",id);
+    const count=parseInt(val,10)||0;
+    await supabase.from("people").update({appointments_count:count}).eq("id",id);
     refresh();
   }
   async function onMoveXHere(id){ await supabase.from("people").update({is_up:false}).not("id","is",null); await supabase.from("people").update({is_up:true}).eq("id",id); refresh(); }
-  async function onRemove(id){ await supabase.from("makeups").delete().eq("person_id",id); await supabase.from("people").delete().eq("id",id); refresh(true); }
+  async function onRemove(id){ await supabase.from("makeups").delete().eq("person_id",id); await supabase.from("people").delete().eq("id",id); refresh(); }
   async function onScheduleChange(id,val){ await supabase.from("people").update({schedule:val}).eq("id",id); }
 
   async function nextLead(){ 
@@ -164,45 +157,28 @@
     const here=people.filter(p=>p.status!=="Gone"); 
     if(here.length===0) return; 
     let current=people.find(p=>p.is_up); 
-    if(!current||current.status==="Gone"){ 
-      await supabase.from("people").update({is_up:false}).not("id","is",null); 
-      await supabase.from("people").update({is_up:true}).eq("id",here[0].id); 
-      return refresh(); 
-    } 
+    if(!current||current.status==="Gone"){ await supabase.from("people").update({is_up:false}).not("id","is",null); await supabase.from("people").update({is_up:true}).eq("id",here[0].id); return refresh(); } 
     await supabase.from("people").update({leads:(current.leads||0)+1,last_served:new Date().toISOString(),is_up:false}).eq("id",current.id); 
     const curIdx=people.findIndex(p=>p.id===current.id); 
-    const n=people.length; 
-    let nextId=null; 
-    for(let step=1;step<=n;step++){ 
-      const idx=(curIdx+step)%n; 
-      if(people[idx].status!=="Gone"){ nextId=people[idx].id; break; }
-    } 
+    const n=people.length; let nextId=null; 
+    for(let step=1;step<=n;step++){ const idx=(curIdx+step)%n; if(people[idx].status!=="Gone"){ nextId=people[idx].id; break; }} 
     if(nextId) await supabase.from("people").update({is_up:true}).eq("id",nextId); 
     refresh(); 
   }
 
   async function resetAll(){
-    await supabase.from("people").update({leads:0,last_served:null,is_up:false,schedule:"",appointments_count:0});
+    await supabase.from("people").update({leads:0,last_served:null,is_up:false,schedule:"",appointments_count:0,status:"Here"});
     await supabase.from("makeups").delete().not("id","is",null);
     const people=await fetchPeople();
     const firstHere=(people||[]).find(p=>p.status!=="Gone");
     if(firstHere) await supabase.from("people").update({is_up:true}).eq("id",firstHere.id);
-    refresh(true);
-  }
-  async function newDay(){ 
-    await supabase.from("makeups").delete().not("id","is",null); 
-    await supabase.from("people").delete().not("id","is",null); 
-    refresh(true); 
+    refresh();
   }
 
+  async function newDay(){ await supabase.from("makeups").delete().not("id","is",null); await supabase.from("people").delete().not("id","is",null); refresh(); }
+
   // Drag & Drop
-  function enableDrag(tr,id){ 
-    tr.draggable=true; 
-    tr.addEventListener("dragstart",e=>{ tr.classList.add("dragging"); }); 
-    tr.addEventListener("dragend",e=>{ tr.classList.remove("dragging"); }); 
-    tr.addEventListener("dragover",e=>{ e.preventDefault(); const dragging=document.querySelector("tr.dragging"); if(dragging&&tr!==dragging){ const rect=tr.getBoundingClientRect(); const next=(e.clientY-rect.top)>rect.height/2; tbody.insertBefore(dragging,next?tr.nextSibling:tr); } }); 
-    tr.addEventListener("drop",async e=>{ e.preventDefault(); const rows=Array.from(tbody.children); for(let i=0;i<rows.length;i++){ const rowId=rows[i].dataset.id; await supabase.from("people").update({order:i+1}).eq("id",rowId);} refresh(); }); 
-  }
+  function enableDrag(tr,id){ tr.draggable=true; tr.addEventListener("dragstart",e=>{ tr.classList.add("dragging"); }); tr.addEventListener("dragend",e=>{ tr.classList.remove("dragging"); }); tr.addEventListener("dragover",e=>{ e.preventDefault(); const dragging=document.querySelector("tr.dragging"); if(dragging&&tr!==dragging){ const rect=tr.getBoundingClientRect(); const next=(e.clientY-rect.top)>rect.height/2; tbody.insertBefore(dragging,next?tr.nextSibling:tr); } }); tr.addEventListener("drop",async e=>{ e.preventDefault(); const rows=Array.from(tbody.children); for(let i=0;i<rows.length;i++){ const rowId=rows[i].dataset.id; await supabase.from("people").update({order:i+1}).eq("id",rowId);} refresh(); }); }
 
   function renderTable(people,muMap){ 
     tbody.innerHTML=""; 
@@ -221,8 +197,8 @@
         <td>${p.leads ?? 0}</td>
         <td>${fmtTime(p.last_served)}</td>
         <td class="center">${reds}</td>
-        <td class="center"><input type="number" class="apptEdit" value="${p.appointments_count ?? 0}" onchange="onApptChange('${p.id}',this.value)" /></td>
-        <td><button onclick="onNeedMakeup('${p.id}')">Makeup</button><button onclick="onMoveXHere('${p.id}')">X</button></td>
+        <td><input type="number" value="${p.appointments_count ?? 0}" onchange="onApptChange('${p.id}',this.value)" style="width:50px"/></td>
+        <td><button onclick="onNeedMakeup('${p.id}')">Makeup</button><button onclick="onSetAppt('${p.id}')">Appt</button><button onclick="onMoveXHere('${p.id}')">X</button></td>
         <td><textarea onchange="onScheduleChange('${p.id}',this.value)">${p.schedule||""}</textarea></td>
         <td class="center"><button class="removeBtn" onclick="onRemove('${p.id}')">×</button></td>`; 
       tbody.appendChild(tr); 
@@ -232,20 +208,12 @@
   async function renderLeaderboard(){ 
     const { data: people, error } = await supabase.from("people").select("id,name,appointments_count"); 
     if (error) { console.error(error); return; }
-
-    let todayTotal = 0;
-    const rows = [...people].map(p => {
-      todayTotal += p.appointments_count || 0;
-      return {name:p.name, count:p.appointments_count||0};
-    }).sort((a,b)=>b.count-a.count);
-
-    leaderEl.innerHTML="";
-    rows.forEach(r=>{
-      const tr=document.createElement("tr");
-      tr.innerHTML=`<td>${r.name}</td><td>${r.count}</td>`;
-      leaderEl.appendChild(tr);
-    });
-    apptTotalEl.textContent = todayTotal;
+    let todayTotal=0; 
+    const rows=(people||[]).map(p=>{ todayTotal+=p.appointments_count||0; return {name:p.name,count:p.appointments_count||0}; }); 
+    rows.sort((a,b)=>b.count-a.count); 
+    leaderEl.innerHTML=""; 
+    rows.forEach(r=>{ const tr=document.createElement("tr"); tr.innerHTML=`<td>${r.name}</td><td>${r.count}</td>`; leaderEl.appendChild(tr); }); 
+    apptTotalEl.textContent=todayTotal; 
   }
 
   async function refresh(){ 
