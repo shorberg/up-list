@@ -8,7 +8,7 @@
   <style>
     :root{
       --bg:#f6f8fb; --ink:#0f1a2a; --muted:#5b6b7a; --line:#e6eaf0; --accent:#2f67ff;
-      --good:#1f9d55; --bad:#d64545; --thead:#0f172a;
+      --thead:#0f172a;
     }
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;padding:20px}
@@ -38,6 +38,7 @@
     <button class="primary" id="addBtn">Add</button>
     <button id="nextBtn">Next Lead</button>
     <button id="resetBtn">Reset</button>
+    <button id="newDayBtn">New Day</button>
   </div>
 
   <table>
@@ -126,7 +127,6 @@
     const fixed = titleCase(raw);
     const people = await fetchPeople();
     const nextOrder = people.length? Math.max(...people.map(p=>p.order||0))+1:1;
-
     const anyUp = people.some(p => p.is_up === true);
     const { error } = await supabase.from("people").insert([{
       name:fixed,status:"Here",is_up: !anyUp && people.length===0,order:nextOrder,
@@ -138,7 +138,6 @@
   }
 
   async function onNeedMakeup(id){
-    // Decrement leads (min 0) then add a FIFO makeup row
     const { data: p, error: e1 } = await supabase.from("people").select("leads").eq("id",id).single();
     if (!e1 && p) {
       await supabase.from("people").update({leads: Math.max(0,(p.leads||0)-1)}).eq("id",id);
@@ -161,7 +160,6 @@
   }
 
   async function onStatusChange(id,val){
-    // If person becoming Gone and was up, clear X
     const { data: p } = await supabase.from("people").select("is_up").eq("id",id).single();
     if (p?.is_up && val === "Gone") await supabase.from("people").update({is_up:false}).eq("id",id);
     await supabase.from("people").update({status:val}).eq("id",id);
@@ -197,22 +195,19 @@
 
     // 2) Normal rotation among "Here" only
     const here = people.filter(p => p.status !== "Gone");
-    if (here.length === 0) return; // everyone Gone → nothing to do
+    if (here.length === 0) return;
 
     let current = people.find(p=>p.is_up);
     if(!current || current.status === "Gone"){
-      // set X to first Here and stop (next press gives them the lead)
       await supabase.from("people").update({is_up:false}).not("id","is",null);
       await supabase.from("people").update({is_up:true}).eq("id",here[0].id);
       return refresh();
     }
 
-    // Give current their lead
     await supabase.from("people").update({
       leads:(current.leads||0)+1,last_served:new Date().toISOString(),is_up:false
     }).eq("id",current.id);
 
-    // Move X to next Here (by global order with wrap)
     const curIdx = people.findIndex(p=>p.id===current.id);
     const n = people.length;
     let nextId = null;
@@ -225,10 +220,38 @@
     refresh();
   }
 
+  // Reset: zero leads, clear last_served & schedules, clear makeups + appts,
+  // then put black X on the first "Here" person (by order)
   async function resetAll(){
-    await supabase.from("people").update({leads:0,last_served:null,is_up:false,schedule:""});
-    await supabase.from("makeups").delete().neq("id","00000000-0000-0000-0000-000000000000");
-    await supabase.from("appointments").delete().neq("id","00000000-0000-0000-0000-000000000000");
+    // zero/clear for everyone
+    const u = await supabase.from("people")
+      .update({leads:0,last_served:null,is_up:false,schedule:""})
+      .not("id","is",null);
+    if (u.error) console.error("reset people error:", u.error);
+
+    // clear queues & appts
+    const d1 = await supabase.from("makeups").delete().not("id","is",null);
+    if (d1.error) console.error("reset makeups error:", d1.error);
+    const d2 = await supabase.from("appointments").delete().not("id","is",null);
+    if (d2.error) console.error("reset appts error:", d2.error);
+
+    // set X to first "Here" person
+    const people = await fetchPeople();
+    const firstHere = (people||[]).find(p => p.status !== "Gone");
+    if (firstHere) {
+      await supabase.from("people").update({is_up:true}).eq("id", firstHere.id);
+    }
+    refresh();
+  }
+
+  // New Day: blow out ALL users and related data, start fresh
+  async function newDay(){
+    const d3 = await supabase.from("makeups").delete().not("id","is",null);
+    if (d3.error) console.error("new day makeups error:", d3.error);
+    const d4 = await supabase.from("appointments").delete().not("id","is",null);
+    if (d4.error) console.error("new day appts error:", d4.error);
+    const d5 = await supabase.from("people").delete().not("id","is",null);
+    if (d5.error) console.error("new day people error:", d5.error);
     refresh();
   }
 
@@ -272,13 +295,10 @@
 
   async function renderLeaderboard(){
     const [appts, ppl] = await Promise.all([fetchAppointments(), supabase.from("people").select("id,name")]);
-    const people = ppl.data || [];
-
-    // Build totals including people with 0
+    const people = (ppl.data || []);
     const counts = {};
     people.forEach(p => counts[p.id] = { name: p.name, count: 0, last: null });
 
-    // Only count appointments from "today" for the top stat; leaderboard shows all since last reset (appointments table is wiped by Reset)
     const today = new Date();
     let todayTotal = 0;
 
@@ -295,7 +315,7 @@
       if (b.count !== a.count) return b.count - a.count;
       const al = a.last ? new Date(a.last).getTime() : 0;
       const bl = b.last ? new Date(b.last).getTime() : 0;
-      return bl - al; // most recent first when tied
+      return bl - al;
     });
 
     leaderEl.innerHTML="";
@@ -318,6 +338,7 @@
   document.getElementById("addBtn").onclick = addPerson;
   document.getElementById("nextBtn").onclick = nextLead;
   document.getElementById("resetBtn").onclick = resetAll;
+  document.getElementById("newDayBtn").onclick = newDay;
   nameInput.addEventListener("keydown", e => { if (e.key === "Enter") addPerson(); });
 
   // Init
